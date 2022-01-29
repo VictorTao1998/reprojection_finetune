@@ -199,6 +199,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     if isTrain:
         print("--------------go real------------------")
         pred_disp3 = psmnet_model(img_real_L, img_real_R, True)
+        print("----------------finish real-----------------")
         real_pred_disp = pred_disp3
     else:
         with torch.no_grad():
