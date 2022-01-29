@@ -212,7 +212,7 @@ class LACGWCNet(nn.Module):
         #else:
         #    predr = self.refine_module(left, pred3.unsqueeze(1))
         #    predr = predr.squeeze(1)
-
+        print(self.training, isreal)
         if self.training and not isreal:
             print('---------------step sim-----------------')
             oshape = pred1.shape
