@@ -162,6 +162,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     # Get stereo loss on sim
     mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)  # Note in training we do not exclude bg
     if isTrain:
+        print("--------------go sim------------------")
         pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_L, img_R, False)
         sim_pred_disp = pred_disp3
         print(pred_disp1.shape, pred_disp2.shape, pred_disp3.shape, mask.shape, disp_gt_l.shape)
@@ -196,6 +197,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     img_real_R_ir_pattern = sample['img_real_R_ir_pattern'].to(cuda_device)
     #img_real_L_transformed, img_real_R_transformed = transformer_model(img_real_L, img_real_R)  # [bs, 3, H, W]
     if isTrain:
+        print("--------------go real------------------")
         pred_disp3 = psmnet_model(img_real_L, img_real_R, True)
         real_pred_disp = pred_disp3
     else:
