@@ -56,7 +56,6 @@ real_obj_id = [4, 5, 7, 9, 13, 14, 15, 16]
 
 
 def test(psmnet_model, val_loader, logger, log_dir):
-    transformer_model.eval()
     psmnet_model.eval()
     total_err_metrics = {'epe': 0, 'bad1': 0, 'bad2': 0,
                          'depth_abs_err': 0, 'depth_err2': 0, 'depth_err4': 0, 'depth_err8': 0}
@@ -138,7 +137,7 @@ def test(psmnet_model, val_loader, logger, log_dir):
         ground_mask = torch.logical_not(mask).squeeze(0).squeeze(0).detach().cpu().numpy()
 
         with torch.no_grad():
-            pred_disp = psmnet_model(img_L, img_R)
+            pred_disp = psmnet_model(img_L, img_R, False)
         pred_disp = pred_disp[:, :, top_pad:, :]  # TODO: if right_pad > 0 it needs to be (:-right_pad)
         pred_depth = img_focal_length * img_baseline / pred_disp  # pred depth in m
 
