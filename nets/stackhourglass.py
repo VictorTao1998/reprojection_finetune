@@ -151,8 +151,8 @@ class LACGWCNet(nn.Module):
             elif isinstance(m, nn.Linear):
                 m.bias.data.zero_()
 
-    def forward(self, left, right, isreal):
-        print(self.training, isreal)
+    def forward(self, left, right):
+
         refimg_fea = self.feature_extraction(left)
         targetimg_fea = self.feature_extraction(right)
 
@@ -182,7 +182,7 @@ class LACGWCNet(nn.Module):
             win_s = 0
 
         
-        if self.training and not isreal:
+        if self.training:
             cost1 = self.classif1(out1)
             cost2 = self.classif2(out2)
 
@@ -205,36 +205,31 @@ class LACGWCNet(nn.Module):
         distribute3 = F.softmax(cost3, dim=1)
         pred3 = DisparityRegression(self.maxdisp, win_size=win_s)(distribute3)
 
-        #if self.refine == 'csr':
-        #    costr, offset, m = self.refine_module(left, cost3.squeeze(1))
-        #    distributer = F.softmax(costr, dim=1)
-        #    predr = DisparityRegression(self.maxdisp, win_size=win_s)(distributer)
+        if self.refine == 'csr':
+            costr, offset, m = self.refine_module(left, cost3.squeeze(1))
+            distributer = F.softmax(costr, dim=1)
+            predr = DisparityRegression(self.maxdisp, win_size=win_s)(distributer)
 
-        #else:
-        #    predr = self.refine_module(left, pred3.unsqueeze(1))
-        #    predr = predr.squeeze(1)
-        #print(self.training, isreal)
-        if self.training and not isreal:
-            print('---------------step sim-----------------')
+        else:
+            predr = self.refine_module(left, pred3.unsqueeze(1))
+            predr = predr.squeeze(1)
+
+        if self.training:
+
             oshape = pred1.shape
             pred1 = torch.reshape(pred1, (oshape[0],1,oshape[1],oshape[2]))
             pred2 = torch.reshape(pred2, (oshape[0],1,oshape[1],oshape[2]))
             pred3 = torch.reshape(pred3, (oshape[0],1,oshape[1],oshape[2]))
-            #predr = torch.reshape(predr, (oshape[0],1,oshape[1],oshape[2]))
-            return pred1, pred2, pred3#, predr
+            predr = torch.reshape(predr, (oshape[0],1,oshape[1],oshape[2]))
+            return pred2, pred3, predr#, predr
 
-        elif self.training and isreal:
-            print('---------------step real-----------------')
-            oshape = pred3.shape
-            pred3 = torch.reshape(pred3, (oshape[0],1,oshape[1],oshape[2]))
-            return pred3
         else:
-            print('------------error------------')
-            #if self.refine:
-            #    oshape = predr.shape
-            #    predr = torch.reshape(predr, (oshape[0],1,oshape[1],oshape[2]))
-            #    return predr
-            #else:
-            oshape = pred3.shape
-            pred3 = torch.reshape(pred3, (oshape[0],1,oshape[1],oshape[2]))
-            return pred3
+
+            if self.refine:
+                oshape = predr.shape
+                predr = torch.reshape(predr, (oshape[0],1,oshape[1],oshape[2]))
+                return predr
+            else:
+                oshape = pred3.shape
+                pred3 = torch.reshape(pred3, (oshape[0],1,oshape[1],oshape[2]))
+                return pred3
