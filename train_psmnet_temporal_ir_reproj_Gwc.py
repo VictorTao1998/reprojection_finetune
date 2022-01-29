@@ -164,6 +164,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     if isTrain:
         pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_L, img_R)
         sim_pred_disp = pred_disp3
+        print(pred_disp1.shape, pred_disp2.shape, pred_disp3.shape)
         loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
                + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
                + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
