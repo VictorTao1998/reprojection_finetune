@@ -163,7 +163,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)  # Note in training we do not exclude bg
     if isTrain:
 
-        pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_L, img_R)
+        pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_L, img_R, False)
         sim_pred_disp = pred_disp3
         print(pred_disp1.shape, pred_disp2.shape, pred_disp3.shape, mask.shape, disp_gt_l.shape)
         loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
@@ -171,7 +171,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
                + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
     else:
         with torch.no_grad():
-            pred_disp = psmnet_model(img_L, img_R)
+            pred_disp = psmnet_model(img_L, img_R, False)
             loss_psmnet = F.smooth_l1_loss(pred_disp[mask], disp_gt_l[mask], reduction='mean')
 
     # Get reprojection loss on sim_ir_pattern
@@ -198,12 +198,12 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     #img_real_L_transformed, img_real_R_transformed = transformer_model(img_real_L, img_real_R)  # [bs, 3, H, W]
     if isTrain:
 
-        pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_real_L, img_real_R)
+        pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_real_L, img_real_R, True)
 
         real_pred_disp = pred_disp3
     else:
         with torch.no_grad():
-            real_pred_disp = psmnet_model(img_real_L, img_real_R)
+            real_pred_disp = psmnet_model(img_real_L, img_real_R, True)
     real_ir_reproj_loss, real_ir_warped, real_ir_reproj_mask = get_reproj_error_patch(
         input_L=img_real_L_ir_pattern,
         input_R=img_real_R_ir_pattern,
