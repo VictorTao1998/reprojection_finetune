@@ -218,7 +218,7 @@ class LACGWCNet(nn.Module):
             pred1 = torch.reshape(pred1, (oshape[0],1,oshape[1],oshape[2]))
             pred2 = torch.reshape(pred2, (oshape[0],1,oshape[1],oshape[2]))
             predr = torch.reshape(predr, (oshape[0],1,oshape[1],oshape[2]))
-            return pred1, pred2, predr
+            return pred2, pred3, predr
 
         else:
             if self.refine:
