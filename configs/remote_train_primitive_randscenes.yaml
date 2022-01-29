@@ -33,7 +33,7 @@ SOLVER:
   LR_STEPS: '10000,20000,30000,40000,60000,80000:2'    # the steps to decay lr: the downscale rate
   STEPS: 50000                              # number of steps to train
   EPOCHS: 20
-  BATCH_SIZE: 1                             # batch size
+  BATCH_SIZE: 2                             # batch size
   NUM_WORKER: 1                               # num_worker in dataloader
 
 # Model parameters
