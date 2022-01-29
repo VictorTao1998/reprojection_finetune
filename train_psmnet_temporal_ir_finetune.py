@@ -82,8 +82,6 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
         # One epoch training loop
         avg_train_scalars_psmnet = AverageMeterDict()
         for batch_idx, sample in enumerate(TrainImgLoader):
-            if batch_idx > 5:
-                break
             global_step = (len(TrainImgLoader) * epoch_idx + batch_idx) * cfg.SOLVER.BATCH_SIZE * num_gpus
             if global_step > cfg.SOLVER.STEPS:
                 break

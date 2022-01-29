@@ -65,8 +65,6 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
     os.mkdir(os.path.join(log_dir, 'pred_depth_abs_err_cmap'))
 
     for iteration, data in enumerate(tqdm(val_loader)):
-        if iteration > 5:
-            break
         img_L = data['img_L'].cuda()    # [bs, 1, H, W]
         img_R = data['img_R'].cuda()
 
