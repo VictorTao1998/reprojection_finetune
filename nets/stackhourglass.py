@@ -214,6 +214,7 @@ class LACGWCNet(nn.Module):
         #    predr = predr.squeeze(1)
 
         if self.training and not isreal:
+            print('---------------step sim-----------------')
             oshape = pred1.shape
             pred1 = torch.reshape(pred1, (oshape[0],1,oshape[1],oshape[2]))
             pred2 = torch.reshape(pred2, (oshape[0],1,oshape[1],oshape[2]))
@@ -222,6 +223,9 @@ class LACGWCNet(nn.Module):
             return pred1, pred2, pred3#, predr
 
         elif self.training and isreal:
+            print('---------------step real-----------------')
+            oshape = pred3.shape
+            pred3 = torch.reshape(pred3, (oshape[0],1,oshape[1],oshape[2]))
             return pred3
 
         else:

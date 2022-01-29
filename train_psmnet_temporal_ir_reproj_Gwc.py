@@ -170,7 +170,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
                + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
     else:
         with torch.no_grad():
-            pred_disp = psmnet_model(img_L, img_R)
+            pred_disp = psmnet_model(img_L, img_R, False)
             loss_psmnet = F.smooth_l1_loss(pred_disp[mask], disp_gt_l[mask], reduction='mean')
 
     # Get reprojection loss on sim_ir_pattern
@@ -200,7 +200,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
         real_pred_disp = pred_disp3
     else:
         with torch.no_grad():
-            real_pred_disp = psmnet_model(img_real_L, img_real_R)
+            real_pred_disp = psmnet_model(img_real_L, img_real_R, True)
     real_ir_reproj_loss, real_ir_warped, real_ir_reproj_mask = get_reproj_error_patch(
         input_L=img_real_L_ir_pattern,
         input_R=img_real_R_ir_pattern,
