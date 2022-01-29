@@ -152,7 +152,7 @@ class LACGWCNet(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, left, right, isreal):
-
+        print(self.training, isreal)
         refimg_fea = self.feature_extraction(left)
         targetimg_fea = self.feature_extraction(right)
 
@@ -181,7 +181,7 @@ class LACGWCNet(nn.Module):
         else:
             win_s = 0
 
-        print(self.training, isreal)
+        
         if self.training and not isreal:
             cost1 = self.classif1(out1)
             cost2 = self.classif2(out2)
