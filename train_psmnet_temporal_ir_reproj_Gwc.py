@@ -198,7 +198,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     #img_real_L_transformed, img_real_R_transformed = transformer_model(img_real_L, img_real_R)  # [bs, 3, H, W]
     if isTrain:
 
-        pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_real_L, img_real_R, True)
+        pred_disp3 = psmnet_model(img_real_L, img_real_R, True)
 
         real_pred_disp = pred_disp3
     else:
