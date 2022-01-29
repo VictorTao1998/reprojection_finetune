@@ -227,8 +227,8 @@ class LACGWCNet(nn.Module):
             oshape = pred3.shape
             pred3 = torch.reshape(pred3, (oshape[0],1,oshape[1],oshape[2]))
             return pred3
-
         else:
+            print('------------error------------')
             #if self.refine:
             #    oshape = predr.shape
             #    predr = torch.reshape(predr, (oshape[0],1,oshape[1],oshape[2]))
