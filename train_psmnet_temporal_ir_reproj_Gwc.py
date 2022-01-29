@@ -302,7 +302,7 @@ if __name__ == '__main__':
     psmnet_optimizer = torch.optim.Adam(psmnet_model.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
     if is_distributed:
         psmnet_model = torch.nn.parallel.DistributedDataParallel(
-            psmnet_model, device_ids=[args.local_rank], output_device=args.local_rank)
+            psmnet_model, device_ids=[args.local_rank], output_device=args.local_rank, find_unused_parameters=True)
     else:
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
