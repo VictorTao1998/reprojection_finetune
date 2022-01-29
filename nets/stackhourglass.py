@@ -151,7 +151,7 @@ class LACGWCNet(nn.Module):
             elif isinstance(m, nn.Linear):
                 m.bias.data.zero_()
 
-    def forward(self, left, right):
+    def forward(self, left, right, isreal):
 
         refimg_fea = self.feature_extraction(left)
         targetimg_fea = self.feature_extraction(right)
@@ -181,7 +181,7 @@ class LACGWCNet(nn.Module):
         else:
             win_s = 0
 
-        if self.training:
+        if self.training and not isreal:
             cost1 = self.classif1(out1)
             cost2 = self.classif2(out2)
 
@@ -213,13 +213,16 @@ class LACGWCNet(nn.Module):
         #    predr = self.refine_module(left, pred3.unsqueeze(1))
         #    predr = predr.squeeze(1)
 
-        if self.training:
+        if self.training and not isreal:
             oshape = pred1.shape
             pred1 = torch.reshape(pred1, (oshape[0],1,oshape[1],oshape[2]))
             pred2 = torch.reshape(pred2, (oshape[0],1,oshape[1],oshape[2]))
             pred3 = torch.reshape(pred3, (oshape[0],1,oshape[1],oshape[2]))
             #predr = torch.reshape(predr, (oshape[0],1,oshape[1],oshape[2]))
             return pred1, pred2, pred3#, predr
+
+        elif self.training and isreal:
+            return pred3
 
         else:
             #if self.refine:
