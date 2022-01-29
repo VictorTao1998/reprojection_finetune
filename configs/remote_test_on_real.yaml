@@ -6,7 +6,7 @@ DIR:
 
 # Split files
 SPLIT:
-  VAL: '/cephfs/edward/lists/poseTest.txt'  # training lists of your sim dataset
+  VAL: '/cephfs/datasets/iccv_pnp/messy-table-dataset/real_v9/training_lists/all.txt'  # training lists of your sim dataset
   LEFT: '0128_irL_denoised_half.png'
   RIGHT: '0128_irR_denoised_half.png'
   DEPTHL: 'depthL.png'
