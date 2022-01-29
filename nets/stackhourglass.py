@@ -181,6 +181,7 @@ class LACGWCNet(nn.Module):
         else:
             win_s = 0
 
+        print(self.training, isreal)
         if self.training and not isreal:
             cost1 = self.classif1(out1)
             cost2 = self.classif2(out2)
@@ -212,7 +213,7 @@ class LACGWCNet(nn.Module):
         #else:
         #    predr = self.refine_module(left, pred3.unsqueeze(1))
         #    predr = predr.squeeze(1)
-        print(self.training, isreal)
+        #print(self.training, isreal)
         if self.training and not isreal:
             print('---------------step sim-----------------')
             oshape = pred1.shape
