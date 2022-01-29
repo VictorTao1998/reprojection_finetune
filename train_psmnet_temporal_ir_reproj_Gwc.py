@@ -189,7 +189,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
         psmnet_optimizer.zero_grad()
         sim_loss.backward()
         psmnet_optimizer.step()
-
+    """
     # Get reprojection loss on real
     img_real_L = sample['img_real_L'].to(cuda_device)  # [bs, 3, 2H, 2W]
     img_real_R = sample['img_real_R'].to(cuda_device)  # [bs, 3, 2H, 2W]
@@ -217,22 +217,23 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
         psmnet_optimizer.zero_grad()
         real_loss.backward()
         psmnet_optimizer.step()
-
+    """
     # Save reprojection outputs and images
     img_output_reproj = {
         'sim_reprojection': {
             'target': img_L_ir_pattern, 'warped': sim_ir_warped, 'pred_disp': sim_pred_disp, 'mask': sim_ir_reproj_mask
-        },
-        'real_reprojection': {
-            'target': img_real_L_ir_pattern, 'warped': real_ir_warped, 'pred_disp': real_pred_disp, 'mask': real_ir_reproj_mask
         }
+        #'real_reprojection': {
+        #    'target': img_real_L_ir_pattern, 'warped': real_ir_warped, 'pred_disp': real_pred_disp, 'mask': real_ir_reproj_mask
+        #}
     }
 
     # Compute stereo error metrics on sim
     pred_disp = sim_pred_disp
     scalar_outputs_psmnet = {'loss': loss_psmnet.item(),
-                             'sim_reprojection_loss': sim_ir_reproj_loss.item(),
-                             'real_reprojection_loss': real_ir_reproj_loss.item()}
+                             'sim_reprojection_loss': sim_ir_reproj_loss.item()
+                             #'real_reprojection_loss': real_ir_reproj_loss.item()
+                            }
     err_metrics = compute_err_metric(disp_gt_l,
                                      depth_gt,
                                      pred_disp,
