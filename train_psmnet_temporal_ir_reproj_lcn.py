@@ -136,8 +136,11 @@ def train_sample(sample, transformer_model, psmnet_model,
     # Load data
     img_L = sample['img_L'].to(cuda_device)  # [bs, 3, H, W]
     img_R = sample['img_R'].to(cuda_device)
-    img_L_ir_pattern, _ = local_contrast_norm(img_L).to(cuda_device)  # [bs, 1, H, W]
-    img_R_ir_pattern, _ = local_contrast_norm(img_R).to(cuda_device)
+    bs, c, h, w = img_L.shape
+    img_L_grey = torch.reshape(img_L[:,0,:,:], (bs,1,h,w))
+    img_R_grey = torch.reshape(img_R[:,0,:,:], (bs,1,h,w))
+    img_L_ir_pattern, _ = local_contrast_norm(img_L_grey).to(cuda_device)  # [bs, 1, H, W]
+    img_R_ir_pattern, _ = local_contrast_norm(img_R_grey).to(cuda_device)
 
     # Train on simple Transformer
     img_L_transformed, img_R_transformed = transformer_model(img_L, img_R)  # [bs, 3, H, W]
@@ -196,8 +199,11 @@ def train_sample(sample, transformer_model, psmnet_model,
     # Get reprojection loss on real
     img_real_L = sample['img_real_L'].to(cuda_device)  # [bs, 3, 2H, 2W]
     img_real_R = sample['img_real_R'].to(cuda_device)  # [bs, 3, 2H, 2W]
-    img_real_L_ir_pattern = local_contrast_norm(img_real_L).to(cuda_device)
-    img_real_R_ir_pattern = local_contrast_norm(img_real_R).to(cuda_device)
+    bs, c, h, w = img_real_L.shape
+    img_real_L_grey = torch.reshape(img_real_L[:,0,:,:], (bs,1,h,w))
+    img_real_R_grey = torch.reshape(img_real_R[:,0,:,:], (bs,1,h,w))
+    img_real_L_ir_pattern = local_contrast_norm(img_real_L_grey).to(cuda_device)
+    img_real_R_ir_pattern = local_contrast_norm(img_real_R_grey).to(cuda_device)
     img_real_L_transformed, img_real_R_transformed = transformer_model(img_real_L, img_real_R)  # [bs, 3, H, W]
     if isTrain:
         pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_real_L, img_real_R, img_real_L_transformed, img_real_R_transformed)
