@@ -205,14 +205,14 @@ class LACGWCNet(nn.Module):
         distribute3 = F.softmax(cost3, dim=1)
         pred3 = DisparityRegression(self.maxdisp, win_size=win_s)(distribute3)
 
-        #if self.refine == 'csr':
-        #    costr, offset, m = self.refine_module(left, cost3.squeeze(1))
-        #    distributer = F.softmax(costr, dim=1)
-        #    predr = DisparityRegression(self.maxdisp, win_size=win_s)(distributer)
+        if self.refine == 'csr':
+            costr, offset, m = self.refine_module(left, cost3.squeeze(1))
+            distributer = F.softmax(costr, dim=1)
+            predr = DisparityRegression(self.maxdisp, win_size=win_s)(distributer)
 
-        #else:
-        #    predr = self.refine_module(left, pred3.unsqueeze(1))
-        #    predr = predr.squeeze(1)
+        else:
+            predr = self.refine_module(left, pred3.unsqueeze(1))
+            predr = predr.squeeze(1)
 
         if self.training and not isreal:
 
@@ -224,9 +224,9 @@ class LACGWCNet(nn.Module):
             return pred1, pred2, pred3#, predr
         
         elif self.training and isreal:
-            oshape = pred3.shape
-            pred3 = torch.reshape(pred3, (oshape[0],1,oshape[1],oshape[2]))
-            return pred3
+            oshape = predr.shape
+            predr = torch.reshape(predr, (oshape[0],1,oshape[1],oshape[2]))
+            return predr
 
         else:
 
