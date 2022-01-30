@@ -137,8 +137,10 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     bs, c, h, w = img_L.shape
     img_L_grey = torch.reshape(img_L[:,0,:,:], (bs,1,h,w))
     img_R_grey = torch.reshape(img_R[:,0,:,:], (bs,1,h,w))
-    img_L_ir_pattern, _ = local_contrast_norm(img_L_grey).to(cuda_device)  # [bs, 1, H, W]
-    img_R_ir_pattern, _ = local_contrast_norm(img_R_grey).to(cuda_device)
+    img_L_ir_pattern, _ = local_contrast_norm(img_L_grey)  # [bs, 1, H, W]
+    img_R_ir_pattern, _ = local_contrast_norm(img_R_grey)
+    img_L_ir_pattern, img_R_ir_pattern = img_L_ir_pattern.to(cuda_device), img_R_ir_pattern.to(cuda_device)
+    
 
     # Train on simple Transformer
     #img_L_transformed, img_R_transformed = transformer_model(img_L, img_R)  # [bs, 3, H, W]
@@ -200,8 +202,9 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     bs, c, h, w = img_real_L.shape
     img_real_L_grey = torch.reshape(img_real_L[:,0,:,:], (bs,1,h,w))
     img_real_R_grey = torch.reshape(img_real_R[:,0,:,:], (bs,1,h,w))
-    img_real_L_ir_pattern = local_contrast_norm(img_real_L_grey).to(cuda_device)
-    img_real_R_ir_pattern = local_contrast_norm(img_real_R_grey).to(cuda_device)
+    img_real_L_ir_pattern, _ = local_contrast_norm(img_real_L_grey)
+    img_real_R_ir_pattern, _ = local_contrast_norm(img_real_R_grey)
+    img_real_L_ir_pattern, img_real_R_ir_pattern = img_real_L_ir_pattern.to(cuda_device), img_real_R_ir_pattern.to(cuda_device)
     #img_real_L_transformed, img_real_R_transformed = transformer_model(img_real_L, img_real_R)  # [bs, 3, H, W]
     if isTrain:
 
