@@ -301,5 +301,9 @@ if __name__ == '__main__':
     else:
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
+    psm_param = sum(p.numel() for p in psmnet_model.parameters() if p.requires_grad)
+    trans_param = sum(p.numel() for p in transformer_model.parameters() if p.requires_grad)
+    print('-------------------'+str(psm_param + trans_param)+'--------------------------')
+
     # Start training
     train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer, TrainImgLoader, ValImgLoader)
