@@ -10,6 +10,7 @@ import cv2
 import torch
 from .config import cfg
 
+from PIL import Image 
 
 def load_from_dataparallel_model(model_pth, sub_model_name):
     # original saved file with DataParallel
@@ -49,8 +50,13 @@ def save_img(log_dir, prefix,
     custom_cmap.set_bad(color='red')
     plt.imsave(os.path.join(log_dir, disp_path), masked_pred_disp_np, cmap=custom_cmap, vmin=0, vmax=cfg.ARGS.MAX_DISP)
 
-    masked_pred_depth_np = np.ma.masked_where(pred_depth_np == -1, pred_depth_np)  # mark background as red
-    plt.imsave(os.path.join(log_dir, depth_path), masked_pred_depth_np, cmap=custom_cmap, vmin=0, vmax=1.25)
+
+    pred_d = Image.fromarray(pred_depth_np)
+    pred_d = pred_d.convert('I')
+    pred_d.save(os.path.join(log_dir, depth_path))
+
+    #masked_pred_depth_np = np.ma.masked_where(pred_depth_np == -1, pred_depth_np)  # mark background as red
+    #plt.imsave(os.path.join(log_dir, depth_path), masked_pred_depth_np, cmap=custom_cmap, vmin=0, vmax=1.25)
 
     # Save ground truth images
     masked_gt_disp_np = np.ma.masked_where(gt_disp_np == -1, gt_disp_np)  # mark background as red

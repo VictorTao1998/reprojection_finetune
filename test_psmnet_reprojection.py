@@ -167,14 +167,15 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
 
         # Get depth image
         pred_depth_np = pred_depth.squeeze(0).squeeze(0).detach().cpu().numpy()  # in m, [H, W]
+        pred_depth_np = pred_depth_np*1000
         # crop depth map to [0.2m, 2m]
         # pred_depth_np[pred_depth_np < 0.2] = -1
         # pred_depth_np[pred_depth_np > 2] = -1
-        pred_depth_np[ground_mask] = -1
+        #pred_depth_np[ground_mask] = -1
 
         # Get depth ground truth image
         gt_depth_np = img_depth_l.squeeze(0).squeeze(0).detach().cpu().numpy()
-        gt_depth_np[ground_mask] = -1
+        #gt_depth_np[ground_mask] = -1
 
         # Get depth error image
         pred_depth_err_np = depth_error_img(pred_depth * 1000, img_depth_l * 1000, mask)
