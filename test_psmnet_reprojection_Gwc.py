@@ -137,7 +137,7 @@ def test(psmnet_model, val_loader, logger, log_dir):
         ground_mask = torch.logical_not(mask).squeeze(0).squeeze(0).detach().cpu().numpy()
 
         with torch.no_grad():
-            pred_disp = psmnet_model(img_L, img_R, False)
+            pred_disp = psmnet_model(img_L, img_R)
         pred_disp = pred_disp[:, :, top_pad:, :]  # TODO: if right_pad > 0 it needs to be (:-right_pad)
         pred_depth = img_focal_length * img_baseline / pred_disp  # pred depth in m
 
