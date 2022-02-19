@@ -125,8 +125,11 @@ class MessytableOnRealDataset(Dataset):
             # img_L_rgb = ((np.array(img_L_rgb) - 127.5) / 127.5)[:, :, None]   # [H, W, 1], in (-1, 1)
             # img_R_rgb = ((np.array(img_R_rgb) - 127.5) / 127.5)[:, :, None]   # [H, W, 1], in (-1, 1)
         else:
-            img_L_rgb = np.array(Image.open(self.img_L[idx]))[:, :, :-1]  # [H, W, 3]
-            img_R_rgb = np.array(Image.open(self.img_R[idx]))[:, :, :-1]  # [H, W, 3]
+            img_L = np.array(Image.open(self.img_L[idx]).convert(mode='L')) / 255  # [H, W]
+            img_R = np.array(Image.open(self.img_R[idx]).convert(mode='L')) / 255
+
+            img_L_rgb = np.repeat(img_L[:, :, None], 3, axis=-1)
+            img_R_rgb = np.repeat(img_R[:, :, None], 3, axis=-1)
 
         img_depth_l = np.array(Image.open(self.img_depth_l[idx])) / 1000    # convert from mm to m
         img_depth_r = np.array(Image.open(self.img_depth_r[idx])) / 1000    # convert from mm to m

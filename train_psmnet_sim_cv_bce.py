@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn.functional as F
 
-from datasets.messytable_temporal_ir import MessytableDataset
+from datasets.messytable_on_real import MessytableOnRealDataset as MessytableDataset
 from nets.psmnet import PSMNet
 from nets.transformer import Transformer
 from utils.cascade_metrics import compute_err_metric
@@ -79,6 +79,7 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
         # One epoch training loop
         avg_train_scalars_psmnet = AverageMeterDict()
         for batch_idx, sample in enumerate(TrainImgLoader):
+
             global_step = (len(TrainImgLoader) * epoch_idx + batch_idx) * cfg.SOLVER.BATCH_SIZE * num_gpus
             if global_step > cfg.SOLVER.STEPS:
                 break
@@ -89,7 +90,7 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
 
             do_summary = global_step % args.summary_freq == 0
             # Train one sample
-            scalar_outputs_psmnet, img_outputs_psmnet, img_output_reproj = \
+            scalar_outputs_psmnet, img_outputs_psmnet = \
                 train_sample(sample, transformer_model, psmnet_model, transformer_optimizer,
                              psmnet_optimizer, isTrain=True)
             # Save result to tensorboard
@@ -98,7 +99,7 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
                 avg_train_scalars_psmnet.update(scalar_outputs_psmnet)
                 if do_summary:
                     # Update reprojection images
-                    save_images_grid(summary_writer, 'train_reproj', img_output_reproj, global_step, nrow=4)
+                    #save_images_grid(summary_writer, 'train_reproj', img_output_reproj, global_step, nrow=4)
                     # Update PSMNet images
                     save_images(summary_writer, 'train_psmnet', img_outputs_psmnet, global_step)
                     # Update PSMNet losses
@@ -135,8 +136,8 @@ def train_sample(sample, transformer_model, psmnet_model,
     # Load data
     img_L = sample['img_L'].to(cuda_device)  # [bs, 3, H, W]
     img_R = sample['img_R'].to(cuda_device)
-    img_L_ir_pattern = sample['img_L_ir_pattern'].to(cuda_device)  # [bs, 1, H, W]
-    img_R_ir_pattern = sample['img_R_ir_pattern'].to(cuda_device)
+    #img_L_ir_pattern = sample['img_L_ir_pattern'].to(cuda_device)  # [bs, 1, H, W]
+    #img_R_ir_pattern = sample['img_R_ir_pattern'].to(cuda_device)
 
     # Train on simple Transformer
     img_L_transformed, img_R_transformed = transformer_model(img_L, img_R)  # [bs, 3, H, W]
@@ -164,27 +165,34 @@ def train_sample(sample, transformer_model, psmnet_model,
     # Get stereo loss on sim
     mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)  # Note in training we do not exclude bg
     if isTrain:
-        pred_disp1, pred_disp2, pred_disp3 = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
+        pred_disp1, pred_disp2, pred_disp3, cost_vol = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
         sim_pred_disp = pred_disp3
-        loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
-               + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
-               + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
+        gt_disp = torch.clone(disp_gt_l).long()
+        msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
+        #gt_disp[msk_gt_disp] = 0
+        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).squeeze(1).float().cuda()
+        cost_vol = cost_vol.permute(0,2,3,1)
+        #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
+        loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
+        #loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
+        #       + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
+        #       + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
     else:
         with torch.no_grad():
             pred_disp = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
             loss_psmnet = F.smooth_l1_loss(pred_disp[mask], disp_gt_l[mask], reduction='mean')
 
     # Get reprojection loss on sim_ir_pattern
-    sim_ir_reproj_loss, sim_ir_warped, sim_ir_reproj_mask = get_reproj_error_patch(
-        input_L=img_L_ir_pattern,
-        input_R=img_R_ir_pattern,
-        pred_disp_l=sim_pred_disp,
-        mask=mask,
-        ps=args.ps
-    )
+    #sim_ir_reproj_loss, sim_ir_warped, sim_ir_reproj_mask = get_reproj_error_patch(
+    #    input_L=img_L_ir_pattern,
+    #    input_R=img_R_ir_pattern,
+    #    pred_disp_l=sim_pred_disp,
+    #    mask=mask,
+    #    ps=args.ps
+    #)
 
     # Backward on sim_ir_pattern reprojection
-    sim_loss = loss_psmnet * args.loss_ratio_sim + sim_ir_reproj_loss
+    sim_loss = loss_psmnet * args.loss_ratio_sim
     if isTrain:
         transformer_optimizer.zero_grad()
         psmnet_optimizer.zero_grad()
@@ -222,19 +230,19 @@ def train_sample(sample, transformer_model, psmnet_model,
         transformer_optimizer.step()
     """
     # Save reprojection outputs and images
-    img_output_reproj = {
-        'sim_reprojection': {
-            'target': img_L_ir_pattern, 'warped': sim_ir_warped, 'pred_disp': sim_pred_disp, 'mask': sim_ir_reproj_mask
-        }
-        #'real_reprojection': {
-        #    'target': img_real_L_ir_pattern, 'warped': real_ir_warped, 'pred_disp': real_pred_disp, 'mask': real_ir_reproj_mask
-        #}
-    }
+    #img_output_reproj = {
+    #    'sim_reprojection': {
+    #        'target': img_L_ir_pattern, 'warped': sim_ir_warped, 'pred_disp': sim_pred_disp, 'mask': sim_ir_reproj_mask
+    #    }
+    #    #'real_reprojection': {
+    #    #    'target': img_real_L_ir_pattern, 'warped': real_ir_warped, 'pred_disp': real_pred_disp, 'mask': real_ir_reproj_mask
+    #    #}
+    #}
 
     # Compute stereo error metrics on sim
     pred_disp = sim_pred_disp
-    scalar_outputs_psmnet = {'loss': loss_psmnet.item(),
-                             'sim_reprojection_loss': sim_ir_reproj_loss.item()
+    scalar_outputs_psmnet = {'loss': loss_psmnet.item()
+                             #'sim_reprojection_loss': sim_ir_reproj_loss.item()
                              #'real_reprojection_loss': real_ir_reproj_loss.item()
                             }
     err_metrics = compute_err_metric(disp_gt_l,
@@ -257,15 +265,15 @@ def train_sample(sample, transformer_model, psmnet_model,
 
     if is_distributed:
         scalar_outputs_psmnet = reduce_scalar_outputs(scalar_outputs_psmnet, cuda_device)
-    return scalar_outputs_psmnet, img_outputs_psmnet, img_output_reproj
+    return scalar_outputs_psmnet, img_outputs_psmnet#, img_output_reproj
 
 
 if __name__ == '__main__':
     # Obtain dataloader
     train_dataset = MessytableDataset(cfg.SPLIT.TRAIN, gaussian_blur=args.gaussian_blur, color_jitter=args.color_jitter,
-                                    debug=args.debug, sub=args.sub)
+                                    debug=args.debug, sub=args.sub, onreal = False)
     val_dataset = MessytableDataset(cfg.SPLIT.VAL, gaussian_blur=args.gaussian_blur, color_jitter=args.color_jitter,
-                                    debug=args.debug, sub=10)
+                                    debug=args.debug, sub=10, onreal = False)
     if is_distributed:
         train_sampler = torch.utils.data.DistributedSampler(train_dataset, num_replicas=dist.get_world_size(),
                                                             rank=dist.get_rank())
@@ -293,7 +301,7 @@ if __name__ == '__main__':
         transformer_model = torch.nn.DataParallel(transformer_model)
 
     # Create PSMNet model
-    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP).to(cuda_device)
+    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, loss='BCE').to(cuda_device)
     psmnet_optimizer = torch.optim.Adam(psmnet_model.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
     if is_distributed:
         psmnet_model = torch.nn.parallel.DistributedDataParallel(
@@ -301,10 +309,10 @@ if __name__ == '__main__':
     else:
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
-    psm_param = sum(p.numel() for p in psmnet_model.parameters() if p.requires_grad)
-    trans_param = sum(p.numel() for p in transformer_model.parameters() if p.requires_grad)
-    print(str(psm_param)+','+str(trans_param)+','+str(psm_param + trans_param))
+    #psm_param = sum(p.numel() for p in psmnet_model.parameters() if p.requires_grad)
+    #trans_param = sum(p.numel() for p in transformer_model.parameters() if p.requires_grad)
+    #print(str(psm_param)+','+str(trans_param)+','+str(psm_param + trans_param))
     
 
     # Start training
-    #train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer, TrainImgLoader, ValImgLoader)
+    train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer, TrainImgLoader, ValImgLoader)

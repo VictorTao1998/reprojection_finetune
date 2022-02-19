@@ -62,9 +62,10 @@ class hourglass(nn.Module):
 
 
 class PSMNet(nn.Module):
-    def __init__(self, maxdisp=192):
+    def __init__(self, maxdisp=192, loss='BCE'):
         super(PSMNet, self).__init__()
         self.maxdisp = maxdisp
+        self.loss = loss
 
         self.feature_extraction = FeatureExtraction()
 
@@ -170,14 +171,16 @@ class PSMNet(nn.Module):
         # cost3 = F.upsample(cost3, [self.maxdisp,img_L.size()[2],img_L.size()[3]], mode='trilinear')
         cost3 = F.interpolate(cost3, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
         cost3 = torch.squeeze(cost3, 1)
-        pred3 = F.softmax(cost3, dim=1)
+        cost3 = F.softmax(cost3, dim=1)
 
         # For your information: This formulation 'softmax(c)' learned "similarity"
         # while 'softmax(-c)' learned 'matching cost' as mentioned in the paper.
         # However, 'c' or '-c' do not affect the performance because feature-based cost volume provided flexibility.
-        pred3 = DisparityRegression(self.maxdisp)(pred3)
+        pred3 = DisparityRegression(self.maxdisp)(cost3)
 
-        if self.training:
+        if self.training and self.loss == 'BCE':
+            return pred1, pred2, pred3, cost3
+        elif self.training:
             return pred1, pred2, pred3
         else:
             return pred3
