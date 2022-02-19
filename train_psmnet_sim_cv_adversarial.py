@@ -80,16 +80,16 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
         # One epoch training loop
         avg_train_scalars_psmnet = AverageMeterDict()
         for batch_idx, sample in enumerate(TrainImgLoader):
-            if batch_idx < 5000:
+            global_step = (len(TrainImgLoader) * epoch_idx + batch_idx) * cfg.SOLVER.BATCH_SIZE * num_gpus
+            if global_step < 5000:
                 dis = False
                 adv = False
-            elif batch_idx >= 5000 and batch_idx < 10000:
+            elif global_step >= 5000 and global_step < 10000:
                 dis = True
                 adv = False
             else:
                 dis = True
                 adv = True
-            global_step = (len(TrainImgLoader) * epoch_idx + batch_idx) * cfg.SOLVER.BATCH_SIZE * num_gpus
             if global_step > cfg.SOLVER.STEPS:
                 break
 
@@ -225,6 +225,7 @@ def train_sample(sample, transformer_model, psmnet_model, discriminator,
         sim_loss = loss_psmnet * args.loss_ratio_sim + loss_adversarial * args.loss_ratio_adversarial
     else:
         sim_loss = loss_psmnet * args.loss_ratio_sim
+
     if isTrain:
         discriminator.eval()
         transformer_optimizer.zero_grad()
