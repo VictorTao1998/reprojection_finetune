@@ -8,22 +8,20 @@ import torch
 import torch.nn as nn
 
 
-class SimpleD32(nn.Module):
-    def __init__(self):
-        super(SimpleD32, self).__init__()
+class Discriminator(nn.Module):
+    def __init__(self, inplane, outplane):
+        super(Discriminator, self).__init__()
         self.net1 = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1, dilation=1),
-            # nn.BatchNorm2d(16),
-            nn.LeakyReLU(0.2, inplace=True)
+            nn.Conv3d(inplane, 32, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(64, 64, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1, dilation=1)
+            #nn.LeakyReLU(0.2, inplace=True)
         )
         self.net2 = nn.Sequential(
-            nn.Conv2d(16, 16, kernel_size=3, stride=4, padding=1, dilation=1),
-            nn.BatchNorm2d(16),
-            nn.LeakyReLU(0.2, inplace=True)
-        )
-        self.net3 = nn.Sequential(
-            nn.Conv2d(16, 1, kernel_size=3, stride=4, padding=1, dilation=1),
+            nn.Linear(128, outplane),
             nn.Sigmoid()
+            #nn.LeakyReLU(0.2, inplace=True)
         )
 
     def forward(self, input):
@@ -33,8 +31,11 @@ class SimpleD32(nn.Module):
         """
         bs = input.shape[0]
         output = self.net1(input)
+        #print('before ', output.shape)
+        output = torch.permute(output, (0,2,3,4,1))
+        #print('before ', output.shape)
         output = self.net2(output)
-        output = self.net3(output).view(bs, 1)
+        #output = self.net3(output).view(bs, 1)
         return output
 
 

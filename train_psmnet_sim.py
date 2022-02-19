@@ -168,16 +168,16 @@ def train_sample(sample, transformer_model, psmnet_model,
     if isTrain:
         pred_disp1, pred_disp2, pred_disp3, cost_vol = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
         sim_pred_disp = pred_disp3
-        gt_disp = torch.clone(disp_gt_l).long()
-        msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
+        #gt_disp = torch.clone(disp_gt_l).long()
+        #msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
         #gt_disp[msk_gt_disp] = 0
-        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).squeeze(1).float().cuda()
-        cost_vol = cost_vol.permute(0,2,3,1)
+        #gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).squeeze(1).float().cuda()
+        #cost_vol = cost_vol.permute(0,2,3,1)
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
-        loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
-        #loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
-        #       + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
-        #       + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
+        #loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
+        loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
+               + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
+               + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
     else:
         with torch.no_grad():
             pred_disp = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
@@ -242,7 +242,7 @@ def train_sample(sample, transformer_model, psmnet_model,
 
     # Compute stereo error metrics on sim
     pred_disp = sim_pred_disp
-    scalar_outputs_psmnet = {'bceloss': loss_psmnet.item()
+    scalar_outputs_psmnet = {'loss': loss_psmnet.item()
                              #'sim_reprojection_loss': sim_ir_reproj_loss.item()
                              #'real_reprojection_loss': real_ir_reproj_loss.item()
                             }

@@ -138,6 +138,7 @@ class PSMNet(nn.Module):
                 cost[:, feature_size:, i, :, :] = targetimg_feature
         cost = cost.contiguous()  # [bs, fs*2, max_disp/4, H/4, W/4]
 
+        #print(cost.shape)
         cost0 = self.dres0(cost)
         cost0 = self.dres1(cost0) + cost0
 

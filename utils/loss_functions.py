@@ -24,6 +24,9 @@ def CEloss(disp_gt, max_disp, gt_distribute, pred_distribute):
     ce_loss = torch.mean(ce_loss[mask])
     return ce_loss
 
+def BCEDLoss(fake, real):
+    pass
+
 
 class DispAffinity(nn.Module):
     def __init__(self, win_w, win_h, dilation, max_disp):

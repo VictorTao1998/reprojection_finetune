@@ -30,7 +30,7 @@ cudnn.benchmark = True
 parser = argparse.ArgumentParser(description='Reprojection with Pyramid Stereo Network (PSMNet)')
 parser.add_argument('--config-file', type=str, default='./configs/local_train_steps.yaml',
                     metavar='FILE', help='Config files')
-parser.add_argument('--summary-freq', type=int, default=500, help='Frequency of saving temporary results')
+parser.add_argument('--summary-freq', type=int, default=5, help='Frequency of saving temporary results')
 parser.add_argument('--save-freq', type=int, default=1000, help='Frequency of saving checkpoint')
 parser.add_argument('--logdir', required=True, help='Directory to save logs and checkpoints')
 parser.add_argument('--seed', type=int, default=1, metavar='S', help='Random seed (default: 1)')
@@ -39,7 +39,7 @@ parser.add_argument('--debug', action='store_true', help='Whether run in debug m
 parser.add_argument('--sub', type=int, default=100, help='If debug mode is enabled, sub will be the number of data loaded')
 parser.add_argument('--warp-op', action='store_true',default=True, help='whether use warp_op function to get disparity')
 parser.add_argument('--loss-ratio-sim', type=float, default=1, help='Ratio between loss_psmnet_sim and loss_reprojection_sim')
-parser.add_argument('--loss-ratio-real', type=float, default=1, help='Ratio for loss_reprojection_real')
+parser.add_argument('--loss_ratio_adversarial', type=float, default=1, help='Ratio for loss_reprojection_real')
 parser.add_argument('--gaussian-blur', action='store_true',default=False, help='whether apply gaussian blur')
 parser.add_argument('--color-jitter', action='store_true',default=False, help='whether apply color jitter')
 parser.add_argument('--ps', type=int, default=11, help='Patch size of doing patch loss calculation')
@@ -74,13 +74,21 @@ logger.info(f'Running with {num_gpus} GPUs')
 # python -m torch.distributed.launch train_psmnet_temporal_ir_reproj.py --config-file configs/remote_train_primitive_randscenes.yaml --summary-freq 10 --save-freq 100 --logdir ../train_10_21_psmnet_smooth_ir_reproj/debug --debug
 
 
-def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer,
+def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer, discriminator, discriminator_optimizer,
           TrainImgLoader, ValImgLoader):
     for epoch_idx in range(cfg.SOLVER.EPOCHS):
         # One epoch training loop
         avg_train_scalars_psmnet = AverageMeterDict()
         for batch_idx, sample in enumerate(TrainImgLoader):
-
+            if batch_idx < 5000:
+                dis = False
+                adv = False
+            elif batch_idx >= 5000 and batch_idx < 10000:
+                dis = True
+                adv = False
+            else:
+                dis = True
+                adv = True
             global_step = (len(TrainImgLoader) * epoch_idx + batch_idx) * cfg.SOLVER.BATCH_SIZE * num_gpus
             if global_step > cfg.SOLVER.STEPS:
                 break
@@ -92,8 +100,8 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
             do_summary = global_step % args.summary_freq == 0
             # Train one sample
             scalar_outputs_psmnet, img_outputs_psmnet = \
-                train_sample(sample, transformer_model, psmnet_model, transformer_optimizer,
-                             psmnet_optimizer, isTrain=True)
+                train_sample(sample, transformer_model, psmnet_model, discriminator, transformer_optimizer,
+                             psmnet_optimizer, discriminator_optimizer, isTrain=True, isDis=dis, isAdv=adv)
             # Save result to tensorboard
             if (not is_distributed) or (dist.get_rank() == 0):
                 scalar_outputs_psmnet = tensor2float(scalar_outputs_psmnet)
@@ -106,6 +114,9 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
                     # Update PSMNet losses
                     scalar_outputs_psmnet.update({'lr': psmnet_optimizer.param_groups[0]['lr']})
                     save_scalars(summary_writer, 'train_psmnet', scalar_outputs_psmnet, global_step)
+
+                    total_err_metric_psmnet = avg_train_scalars_psmnet.mean()
+                    logger.info(f'Step {global_step} train psmnet: {total_err_metric_psmnet}')
 
                 # Save checkpoints
                 if (global_step) % args.save_freq == 0:
@@ -125,14 +136,16 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
         gc.collect()
 
 
-def train_sample(sample, transformer_model, psmnet_model,
-                 transformer_optimizer, psmnet_optimizer, isTrain=True):
+def train_sample(sample, transformer_model, psmnet_model, discriminator, 
+                 transformer_optimizer, psmnet_optimizer, discriminator_optimizer, isTrain=True, isDis=True, isAdv=True):
     if isTrain:
         transformer_model.train()
         psmnet_model.train()
+        discriminator.train()
     else:
         transformer_model.eval()
         psmnet_model.eval()
+        discriminator.eval()
 
     # Load data
     img_L = sample['img_L'].to(cuda_device)  # [bs, 3, H, W]
@@ -167,17 +180,32 @@ def train_sample(sample, transformer_model, psmnet_model,
     mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)  # Note in training we do not exclude bg
     if isTrain:
         pred_disp1, pred_disp2, pred_disp3, cost_vol = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
+        #dis_output = discriminator(cost_vol)
         sim_pred_disp = pred_disp3
         gt_disp = torch.clone(disp_gt_l).long()
         msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
         #gt_disp[msk_gt_disp] = 0
-        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).squeeze(1).float().cuda()
-        cost_vol = cost_vol.permute(0,2,3,1)
+        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).float().cuda().permute(0,1,4,2,3)
+        cost_vol = cost_vol.unsqueeze(1)
+        #print(cost_vol.shape, gt_cv.shape)
+        pred_cv = cost_vol.detach()
+        gt_cv = gt_cv.detach()
+
+        fake_out = discriminator(pred_cv)
+        real_out = discriminator(gt_cv)
+        #print(torch.sum(fake_out <= 1))
+        #assert torch.sum(fake_out <= 1) == 2*12*16*32
+        loss_discriminator = - torch.sum((1-fake_out).log()) - torch.sum(real_out.log())
+        #print(loss_discriminator.item())
+        #print(fake_out.shape, real_out.shape)
+        #with torch.no_grad():
+        pred_out = discriminator(cost_vol)
+        loss_adversarial = - torch.sum(pred_out.log())
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
-        loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
-        #loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
-        #       + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
-        #       + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
+        #loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
+        loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
+               + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
+               + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
     else:
         with torch.no_grad():
             pred_disp = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
@@ -193,13 +221,22 @@ def train_sample(sample, transformer_model, psmnet_model,
     #)
 
     # Backward on sim_ir_pattern reprojection
-    sim_loss = loss_psmnet * args.loss_ratio_sim
+    if isAdv:
+        sim_loss = loss_psmnet * args.loss_ratio_sim + loss_adversarial * args.loss_ratio_adversarial
+    else:
+        sim_loss = loss_psmnet * args.loss_ratio_sim
     if isTrain:
+        discriminator.eval()
         transformer_optimizer.zero_grad()
         psmnet_optimizer.zero_grad()
         sim_loss.backward()
         psmnet_optimizer.step()
         transformer_optimizer.step()
+        if isDis:
+            discriminator.train()
+            discriminator_optimizer.zero_grad()
+            loss_discriminator.backward()
+            discriminator_optimizer.step()
 
     """
     # Get reprojection loss on real
@@ -242,7 +279,9 @@ def train_sample(sample, transformer_model, psmnet_model,
 
     # Compute stereo error metrics on sim
     pred_disp = sim_pred_disp
-    scalar_outputs_psmnet = {'bceloss': loss_psmnet.item()
+    scalar_outputs_psmnet = {'loss': loss_psmnet.item(),
+                             'dis_loss': loss_discriminator.item(),
+                             'adv_loss': loss_adversarial.item()
                              #'sim_reprojection_loss': sim_ir_reproj_loss.item()
                              #'real_reprojection_loss': real_ir_reproj_loss.item()
                             }
@@ -310,10 +349,18 @@ if __name__ == '__main__':
     else:
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
+    discriminator = Discriminator(inplane=1, outplane=1)
+    discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
+    if is_distributed:
+        discriminator = torch.nn.parallel.DistributedDataParallel(
+            discriminator, device_ids=[args.local_rank], output_device=args.local_rank)
+    else:
+        discriminator = torch.nn.DataParallel(discriminator)
+
     #psm_param = sum(p.numel() for p in psmnet_model.parameters() if p.requires_grad)
     #trans_param = sum(p.numel() for p in transformer_model.parameters() if p.requires_grad)
     #print(str(psm_param)+','+str(trans_param)+','+str(psm_param + trans_param))
     
 
     # Start training
-    train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer, TrainImgLoader, ValImgLoader)
+    train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer, discriminator, discriminator_optimizer, TrainImgLoader, ValImgLoader)
