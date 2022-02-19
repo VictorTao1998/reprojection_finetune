@@ -241,7 +241,7 @@ def train_sample(sample, transformer_model, psmnet_model,
 
     # Compute stereo error metrics on sim
     pred_disp = sim_pred_disp
-    scalar_outputs_psmnet = {'loss': loss_psmnet.item()
+    scalar_outputs_psmnet = {'bceloss': loss_psmnet.item()
                              #'sim_reprojection_loss': sim_ir_reproj_loss.item()
                              #'real_reprojection_loss': real_ir_reproj_loss.item()
                             }
