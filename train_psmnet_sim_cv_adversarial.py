@@ -82,7 +82,7 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
         for batch_idx, sample in enumerate(TrainImgLoader):
             global_step = (len(TrainImgLoader) * epoch_idx + batch_idx) * cfg.SOLVER.BATCH_SIZE * num_gpus
             if global_step < 5000:
-                dis = False
+                dis = True
                 adv = False
             elif global_step >= 5000 and global_step < 10000:
                 dis = True
@@ -90,6 +90,7 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
             else:
                 dis = True
                 adv = False
+
             if global_step > cfg.SOLVER.STEPS:
                 break
 
@@ -99,9 +100,24 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
 
             do_summary = global_step % args.summary_freq == 0
             # Train one sample
+            #before_p = discriminator.parameters()
+            #before_m = psmnet_model.parameters()
             scalar_outputs_psmnet, img_outputs_psmnet = \
                 train_sample(sample, transformer_model, psmnet_model, discriminator, transformer_optimizer,
                              psmnet_optimizer, discriminator_optimizer, isTrain=True, isDis=dis, isAdv=adv)
+            #after_p = discriminator.parameters()
+            #after_m = psmnet_model.parameters()
+            #isSameD = True
+            #for p1, p2 in zip(before_p, after_p):
+            #    if p1.data.ne(p2.data).sum() > 0:
+            #        isSameD = False
+
+            #isSameM = True
+            #for p1, p2 in zip(before_m, after_m):
+            #    if p1.data.ne(p2.data).sum() > 0:
+            #        isSameM = False
+
+            #print(isSameD, isSameM)
             # Save result to tensorboard
             if (not is_distributed) or (dist.get_rank() == 0):
                 scalar_outputs_psmnet = tensor2float(scalar_outputs_psmnet)
@@ -191,11 +207,15 @@ def train_sample(sample, transformer_model, psmnet_model, discriminator,
         pred_cv = cost_vol.detach()
         gt_cv = gt_cv.detach()
 
+        pred_cv.requires_grad = True
+        gt_cv.requires_grad = True
+
         fake_out = discriminator(pred_cv)
         real_out = discriminator(gt_cv)
         #print(torch.sum(fake_out <= 1))
         #assert torch.sum(fake_out <= 1) == 2*12*16*32
         loss_discriminator = - torch.sum((1-fake_out).log()) - torch.sum(real_out.log())
+        #print('require: ',loss_discriminator.requires_grad)
         #print(loss_discriminator.item())
         #print(fake_out.shape, real_out.shape)
         #with torch.no_grad():
@@ -227,17 +247,37 @@ def train_sample(sample, transformer_model, psmnet_model, discriminator,
         sim_loss = loss_psmnet * args.loss_ratio_sim
 
     if isTrain:
-        discriminator.eval()
+        #discriminator.eval()
+        before_p = discriminator.parameters()
+        before_m = psmnet_model.parameters()
         transformer_optimizer.zero_grad()
         psmnet_optimizer.zero_grad()
         sim_loss.backward()
         psmnet_optimizer.step()
         transformer_optimizer.step()
         if isDis:
+            #print('back')
             discriminator.train()
             discriminator_optimizer.zero_grad()
             loss_discriminator.backward()
+            #for param in discriminator.parameters():
+            #    print(param.grad.data.sum())
             discriminator_optimizer.step()
+
+        after_p = discriminator.parameters()
+        after_m = psmnet_model.parameters()
+        isSameD = True
+        for p1, p2 in zip(before_p, after_p):
+            if p1.data.ne(p2.data).sum() > 0:
+                isSameD = False
+
+        isSameM = True
+        for p1, p2 in zip(before_m, after_m):
+            if p1.data.ne(p2.data).sum() > 0:
+                isSameM = False
+
+        print(isSameD, isSameM)
+
 
     """
     # Get reprojection loss on real
@@ -351,7 +391,7 @@ if __name__ == '__main__':
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
     discriminator = Discriminator(inplane=1, outplane=1).to(cuda_device)
-    discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
+    discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.9, 0.999))
     if is_distributed:
         discriminator = torch.nn.parallel.DistributedDataParallel(
             discriminator, device_ids=[args.local_rank], output_device=args.local_rank)
