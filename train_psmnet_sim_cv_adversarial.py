@@ -350,7 +350,7 @@ if __name__ == '__main__':
     else:
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
-    discriminator = Discriminator(inplane=1, outplane=1)
+    discriminator = Discriminator(inplane=1, outplane=1).to(cuda_device)
     discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
     if is_distributed:
         discriminator = torch.nn.parallel.DistributedDataParallel(
