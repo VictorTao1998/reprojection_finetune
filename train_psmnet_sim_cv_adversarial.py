@@ -89,7 +89,7 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
                 adv = False
             else:
                 dis = True
-                adv = True
+                adv = False
             if global_step > cfg.SOLVER.STEPS:
                 break
 
