@@ -162,12 +162,12 @@ class PSMNet(nn.Module):
             cost2 = F.interpolate(cost2, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
 
             cost1 = torch.squeeze(cost1, 1)
-            pred1 = F.softmax(cost1, dim=1)
-            pred1 = DisparityRegression(self.maxdisp)(pred1)
+            cost1 = F.softmax(cost1, dim=1)
+            pred1 = DisparityRegression(self.maxdisp)(cost1)
 
             cost2 = torch.squeeze(cost2, 1)
-            pred2 = F.softmax(cost2, dim=1)
-            pred2 = DisparityRegression(self.maxdisp)(pred2)
+            cost2 = F.softmax(cost2, dim=1)
+            pred2 = DisparityRegression(self.maxdisp)(cost2)
 
         # cost3 = F.upsample(cost3, [self.maxdisp,img_L.size()[2],img_L.size()[3]], mode='trilinear')
         cost3 = F.interpolate(cost3, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
@@ -180,7 +180,7 @@ class PSMNet(nn.Module):
         pred3 = DisparityRegression(self.maxdisp)(cost3)
 
         if self.training and self.loss == 'BCE':
-            return pred1, pred2, pred3, cost3
+            return pred1, pred2, pred3, cost1, cost2, cost3
         elif self.training:
             return pred1, pred2, pred3
         else:

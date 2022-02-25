@@ -80,7 +80,6 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
         # One epoch training loop
         avg_train_scalars_psmnet = AverageMeterDict()
         for batch_idx, sample in enumerate(TrainImgLoader):
-
             global_step = (len(TrainImgLoader) * epoch_idx + batch_idx) * cfg.SOLVER.BATCH_SIZE * num_gpus
             if global_step > cfg.SOLVER.STEPS:
                 break
@@ -166,15 +165,17 @@ def train_sample(sample, transformer_model, psmnet_model,
     # Get stereo loss on sim
     mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)  # Note in training we do not exclude bg
     if isTrain:
-        pred_disp1, pred_disp2, pred_disp3, cost_vol = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
+        pred_disp1, pred_disp2, pred_disp3, cost_vol_1, cost_vol_2, cost_vol_3 = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
         sim_pred_disp = pred_disp3
         gt_disp = torch.clone(disp_gt_l).long()
         msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
         #gt_disp[msk_gt_disp] = 0
-        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).squeeze(1).float().cuda()
-        cost_vol = cost_vol.permute(0,2,3,1)
+        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).squeeze(1).float().cuda().permute(0,3,1,2)
+        #cost_vol = cost_vol.permute(0,2,3,1)
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
-        loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
+        loss_psmnet = 0.5 * F.binary_cross_entropy(cost_vol_1, gt_cv, reduction = 'mean') \
+                    + 0.7 * F.binary_cross_entropy(cost_vol_2, gt_cv, reduction = 'mean') \
+                    + F.binary_cross_entropy(cost_vol_3, gt_cv, reduction = 'mean')
         #loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
         #       + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
         #       + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
