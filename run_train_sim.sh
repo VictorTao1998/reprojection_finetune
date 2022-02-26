@@ -3,6 +3,6 @@ export PYTHONWARNINGS="ignore"
 
 python -m torch.distributed.launch /jianyu-fast-vol/ActiveZero/train_psmnet_sim_cv_bce.py \
 --config-file '/jianyu-fast-vol/ActiveZero/configs/remote_train_primitive_randscenes.yaml' \
---logdir '/jianyu-fast-vol/eval/sim_cv_bce_2/train_sim_cv_bce' \
+--logdir '/jianyu-fast-vol/eval/sim_cv_bce_2/train_sim_cv_bce_weight' \
 --gaussian-blur \
 --color-jitter
