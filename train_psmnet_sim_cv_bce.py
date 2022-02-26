@@ -177,10 +177,10 @@ def train_sample(sample, transformer_model, psmnet_model,
         #print(cost_vol_1.shape, gt_cv.shape)
         #cost_vol = cost_vol.permute(0,2,3,1)
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
-        pos_weight = torch.tensor([192])
-        loss_psmnet = 0.5 * F.binary_cross_entropy_with_logits(cost_vol_1, gt_cv, reduction = 'mean') \
-                    + 0.7 * F.binary_cross_entropy_with_logits(cost_vol_2, gt_cv, reduction = 'mean') \
-                    + F.binary_cross_entropy_with_logits(cost_vol_3, gt_cv, reduction = 'mean')
+        pos_weight = torch.tensor([192]).cuda()
+        loss_psmnet = 0.5 * F.binary_cross_entropy_with_logits(cost_vol_1, gt_cv, reduction = 'mean', pos_weight=pos_weight) \
+                    + 0.7 * F.binary_cross_entropy_with_logits(cost_vol_2, gt_cv, reduction = 'mean', pos_weight=pos_weight) \
+                    + F.binary_cross_entropy_with_logits(cost_vol_3, gt_cv, reduction = 'mean', pos_weight=pos_weight)
         #loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
         #       + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
         #       + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
