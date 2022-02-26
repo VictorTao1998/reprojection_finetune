@@ -22,7 +22,7 @@ from utils.reprojection import get_reproj_error_patch
 from utils.config import cfg
 from utils.reduce import set_random_seed, synchronize, AverageMeterDict, \
     tensor2float, tensor2numpy, reduce_scalar_outputs, make_nograd_func
-from utils.util import setup_logger, weights_init, \
+from utils.util import setup_logger, weights_init, set_requires_grad, \
     adjust_learning_rate, save_scalars, save_scalars_graph, save_images, save_images_grid, disp_error_img
 
 cudnn.benchmark = True
@@ -83,13 +83,13 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
             global_step = (len(TrainImgLoader) * epoch_idx + batch_idx) * cfg.SOLVER.BATCH_SIZE * num_gpus
             if global_step < 5000:
                 dis = True
-                adv = False
+                adv = True
             elif global_step >= 5000 and global_step < 10000:
                 dis = True
-                adv = False
+                adv = True
             else:
                 dis = True
-                adv = False
+                adv = True
 
             if global_step > cfg.SOLVER.STEPS:
                 break
@@ -195,7 +195,9 @@ def train_sample(sample, transformer_model, psmnet_model, discriminator,
     # Get stereo loss on sim
     mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)  # Note in training we do not exclude bg
     if isTrain:
-        pred_disp1, pred_disp2, pred_disp3, cost_vol = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
+        pred_disp1, pred_disp2, pred_disp3, cost_vol_1, cost_vol_2, cost_vol = \
+                psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
+        
         #dis_output = discriminator(cost_vol)
         sim_pred_disp = pred_disp3
         gt_disp = torch.clone(disp_gt_l).long()
@@ -204,32 +206,61 @@ def train_sample(sample, transformer_model, psmnet_model, discriminator,
         gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).float().cuda().permute(0,1,4,2,3)
         cost_vol = cost_vol.unsqueeze(1)
         #print(cost_vol.shape, gt_cv.shape)
-        pred_cv = cost_vol.detach()
-        gt_cv = gt_cv.detach()
 
-        pred_cv.requires_grad = True
-        gt_cv.requires_grad = True
-
-        fake_out = discriminator(pred_cv)
-        real_out = discriminator(gt_cv)
+        set_requires_grad([discriminator], False)
+        #fake_out = discriminator(cost_vol)
+        #real_out = discriminator(gt_cv)
         #print(torch.sum(fake_out <= 1))
         #assert torch.sum(fake_out <= 1) == 2*12*16*32
-        loss_discriminator = - torch.sum((1-fake_out).log()) - torch.sum(real_out.log())
+        #loss_discriminator = - torch.sum((1-fake_out).log()) - torch.sum(real_out.log())
         #print('require: ',loss_discriminator.requires_grad)
         #print(loss_discriminator.item())
         #print(fake_out.shape, real_out.shape)
         #with torch.no_grad():
         pred_out = discriminator(cost_vol)
-        loss_adversarial = - torch.sum(pred_out.log())
+        loss_adversarial = F.binary_cross_entropy_with_logits(pred_out, torch.ones(1).expand_as(pred_out).cuda())
+
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
         #loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
         loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
                + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
                + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
+
+        if isAdv:
+            sim_loss = loss_psmnet * args.loss_ratio_sim + loss_adversarial * args.loss_ratio_adversarial
+        else:
+            sim_loss = loss_psmnet * args.loss_ratio_sim
+
+        transformer_optimizer.zero_grad()
+        psmnet_optimizer.zero_grad()
+        sim_loss.backward()
+        psmnet_optimizer.step()
+        transformer_optimizer.step()
+
+
+        set_requires_grad([discriminator], True)
+        fake_out_d = discriminator(cost_vol.detach())#.unsqueeze(5)
+        real_out_d = discriminator(gt_cv)#.unsqueeze(5)
+        loss_d_fake = F.binary_cross_entropy(fake_out_d, torch.zeros(1).expand_as(fake_out_d).cuda())
+        loss_d_real = F.binary_cross_entropy(real_out_d, torch.ones(1).expand_as(real_out_d).cuda())
+        #print(torch.sum(real_out_d), torch.sum(fake_out_d), real_out_d.shape)
+        #print(torch.sum(cost_vol), torch.sum(gt_cv), cost_vol.shape, gt_cv.shape)
+
+        loss_discriminator = (loss_d_fake + loss_d_real) * 0.5
+
+        if isDis:
+
+            discriminator_optimizer.zero_grad()
+            loss_discriminator.backward()
+            #for param in discriminator.parameters():
+            #    print(param.grad.data.sum())
+            discriminator_optimizer.step()
+
     else:
         with torch.no_grad():
             pred_disp = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
             loss_psmnet = F.smooth_l1_loss(pred_disp[mask], disp_gt_l[mask], reduction='mean')
+            sim_loss = loss_psmnet
 
     # Get reprojection loss on sim_ir_pattern
     #sim_ir_reproj_loss, sim_ir_warped, sim_ir_reproj_mask = get_reproj_error_patch(
@@ -241,42 +272,6 @@ def train_sample(sample, transformer_model, psmnet_model, discriminator,
     #)
 
     # Backward on sim_ir_pattern reprojection
-    if isAdv:
-        sim_loss = loss_psmnet * args.loss_ratio_sim + loss_adversarial * args.loss_ratio_adversarial
-    else:
-        sim_loss = loss_psmnet * args.loss_ratio_sim
-
-    if isTrain:
-        #discriminator.eval()
-        before_p = discriminator.parameters()
-        before_m = psmnet_model.parameters()
-        transformer_optimizer.zero_grad()
-        psmnet_optimizer.zero_grad()
-        sim_loss.backward()
-        psmnet_optimizer.step()
-        transformer_optimizer.step()
-        if isDis:
-            #print('back')
-            discriminator.train()
-            discriminator_optimizer.zero_grad()
-            loss_discriminator.backward()
-            #for param in discriminator.parameters():
-            #    print(param.grad.data.sum())
-            discriminator_optimizer.step()
-
-        after_p = discriminator.parameters()
-        after_m = psmnet_model.parameters()
-        isSameD = True
-        for p1, p2 in zip(before_p, after_p):
-            if p1.data.ne(p2.data).sum() > 0:
-                isSameD = False
-
-        isSameM = True
-        for p1, p2 in zip(before_m, after_m):
-            if p1.data.ne(p2.data).sum() > 0:
-                isSameM = False
-
-        print(isSameD, isSameM)
 
 
     """

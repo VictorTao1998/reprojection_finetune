@@ -13,17 +13,18 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.net1 = nn.Sequential(
             nn.Conv3d(inplane, 32, kernel_size=3, stride=2, padding=1, dilation=1),
-            nn.LeakyReLU(0.2, True),
+            #nn.LeakyReLU(0.2, True),
             nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1, dilation=1),
-            nn.LeakyReLU(0.2, True),
+            #nn.LeakyReLU(0.2, True),
             nn.Conv3d(64, 64, kernel_size=3, stride=2, padding=1, dilation=1),
-            nn.LeakyReLU(0.2, True),
-            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1, dilation=1),
-            nn.LeakyReLU(0.2, True)
+            #nn.LeakyReLU(0.2, True),
+            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1, dilation=1)
+            #nn.LeakyReLU(0.2, True)
             #nn.LeakyReLU(0.2, inplace=True)
         )
         self.net2 = nn.Sequential(
-            nn.Linear(128, outplane),
+            nn.Conv3d(128, 1, kernel_size=3, stride=1, padding=1, dilation=1),
+            #nn.Linear(128, outplane),
             nn.Sigmoid()
             #nn.LeakyReLU(0.2, inplace=True)
         )
@@ -36,7 +37,7 @@ class Discriminator(nn.Module):
         bs = input.shape[0]
         output = self.net1(input)
         #print('before ', output.shape)
-        output = torch.permute(output, (0,2,3,4,1))
+        #output = torch.permute(output, (0,2,3,4,1))
         #print('before ', output.shape)
         output = self.net2(output)
         #output = self.net3(output).view(bs, 1)

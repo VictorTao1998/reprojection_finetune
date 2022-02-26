@@ -212,3 +212,17 @@ def disp_error_img(D_est_tensor, D_gt_tensor, mask, abs_thres=3., rel_thres=0.05
         distance = 20
         error_image[:, :10, i * distance:(i + 1) * distance, :] = cols[i, 2:]
     return error_image[0]   # [H, W, 3]
+
+def set_requires_grad(nets, requires_grad=False):
+    """Set requies_grad=Fasle for all the networks to avoid unnecessary computations
+    Parameters:
+        nets (network list)   -- a list of networks
+        requires_grad (bool)  -- whether the networks require gradients or not
+    """
+    if not isinstance(nets, list):
+        nets = [nets]
+    for net in nets:
+        if net is not None:
+            for param in net.parameters():
+                param.requires_grad = requires_grad
+
