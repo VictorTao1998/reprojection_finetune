@@ -170,7 +170,11 @@ def train_sample(sample, transformer_model, psmnet_model,
         gt_disp = torch.clone(disp_gt_l).long()
         msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
         #gt_disp[msk_gt_disp] = 0
-        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).squeeze(1).float().cuda().permute(0,3,1,2)
+        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).squeeze(1).float().cuda().permute(0,3,1,2).unsqueeze(4)
+        cost_vol_1 = cost_vol_1.unsqueeze(4)
+        cost_vol_2 = cost_vol_2.unsqueeze(4)
+        cost_vol_3 = cost_vol_3.unsqueeze(4)
+        #print(cost_vol_1.shape, gt_cv.shape)
         #cost_vol = cost_vol.permute(0,2,3,1)
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
         loss_psmnet = 0.5 * F.binary_cross_entropy(cost_vol_1, gt_cv, reduction = 'mean') \
