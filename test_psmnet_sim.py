@@ -14,7 +14,7 @@ from tqdm import tqdm
 from datasets.messytable_test import get_test_loader
 
 # from nets.psmnet import PSMNet
-from nets.psmnet_confidence import PSMNet
+from nets.psmnet import PSMNet
 from nets.transformer import Transformer
 from utils.cascade_metrics import compute_err_metric, compute_obj_err
 from utils.config import cfg
