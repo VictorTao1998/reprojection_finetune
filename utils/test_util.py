@@ -102,9 +102,9 @@ def save_img(
 
     # pred
     #pred_conf_color = custom_cmap(pred_conf)[..., :3]
-    #pred_pts = depth2pts_np(pred_depth_np * 1000, cam_intrinsic, cam_extrinsic)
-    #pred_pcd = o3d.geometry.PointCloud()
-    #pred_pcd.points = o3d.utility.Vector3dVector(pred_pts)
+    pred_pts = depth2pts_np(pred_depth_np * 1000, cam_intrinsic, cam_extrinsic)
+    pred_pcd = o3d.geometry.PointCloud()
+    pred_pcd.points = o3d.utility.Vector3dVector(pred_pts)
     #pred_pcd.colors = o3d.utility.Vector3dVector(pred_conf_color.reshape(-1, 3))
     #o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_path), pred_pcd)
 
