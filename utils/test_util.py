@@ -54,7 +54,7 @@ def save_img(
     gt_depth_np,
     realsense_depth_np,
     pred_depth_err_np,
-    pred_conf,
+    #pred_conf,
     cam_intrinsic,
     cam_extrinsic=np.eye(4),
 ):
@@ -85,13 +85,13 @@ def save_img(
         vmax=cfg.ARGS.MAX_DISP,
     )
 
-    plt.imsave(
-        os.path.join(log_dir, pred_conf_path),
-        pred_conf,
-        cmap=custom_cmap,
-        vmin=0.0,
-        vmax=1.0,
-    )
+    #plt.imsave(
+    #    os.path.join(log_dir, pred_conf_path),
+    #    pred_conf,
+    #    cmap=custom_cmap,
+    #    vmin=0.0,
+    #    vmax=1.0,
+    #)
 
     # Save points clouds
     # gt
@@ -101,12 +101,12 @@ def save_img(
     o3d.io.write_point_cloud(os.path.join(log_dir, gt_pcd_path), gt_pcd)
 
     # pred
-    pred_conf_color = custom_cmap(pred_conf)[..., :3]
-    pred_pts = depth2pts_np(pred_depth_np * 1000, cam_intrinsic, cam_extrinsic)
-    pred_pcd = o3d.geometry.PointCloud()
-    pred_pcd.points = o3d.utility.Vector3dVector(pred_pts)
-    pred_pcd.colors = o3d.utility.Vector3dVector(pred_conf_color.reshape(-1, 3))
-    o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_path), pred_pcd)
+    #pred_conf_color = custom_cmap(pred_conf)[..., :3]
+    #pred_pts = depth2pts_np(pred_depth_np * 1000, cam_intrinsic, cam_extrinsic)
+    #pred_pcd = o3d.geometry.PointCloud()
+    #pred_pcd.points = o3d.utility.Vector3dVector(pred_pts)
+    #pred_pcd.colors = o3d.utility.Vector3dVector(pred_conf_color.reshape(-1, 3))
+    #o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_path), pred_pcd)
 
     dists = pred_pcd.compute_point_cloud_distance(gt_pcd)
     dists = np.asarray(dists)
