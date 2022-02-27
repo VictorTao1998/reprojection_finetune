@@ -10,7 +10,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-import cv2
 
 from datasets.messytable_test import get_test_loader
 
@@ -123,8 +122,8 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
     os.mkdir(os.path.join(log_dir, "pred_conf"))
     os.mkdir(os.path.join(log_dir, "pred_pcd"))
     os.mkdir(os.path.join(log_dir, "gt_pcd"))
+    os.mkdir(os.path.join(log_dir, "realsense_pcd"))
     os.mkdir(os.path.join(log_dir, "prob_volume"))
-    os.mkdir(os.path.join(log_dir, "input_images"))
 
     for iteration, data in enumerate(tqdm(val_loader)):
         img_L = data["img_L"].cuda()  # [bs, 1, H, W]
@@ -140,15 +139,6 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
         robot_mask = data["robot_mask"].cuda()
         cam_intrinsic = data["intrinsic_l"].numpy()
         cam_intrinsic[:, :2] /= 2
-
-        mean = np.array([0.485, 0.456, 0.406]).reshape(1, 1, 3)
-        std = np.array([0.229, 0.224, 0.225]).reshape(1, 1, 3)
-        img_L_np = data["img_L"][0].permute(1, 2, 0).numpy()
-        img_R_np = data["img_R"][0].permute(1, 2, 0).numpy()
-        img_L_np = ((img_L_np * std + mean) * 255).astype(np.uint8)
-        img_R_np = ((img_R_np * std + mean) * 255).astype(np.uint8)
-        cv2.imwrite(os.path.join(log_dir, f"input_images/{prefix}_L.png"), img_L_np)
-        cv2.imwrite(os.path.join(log_dir, f"input_images/{prefix}_R.png"), img_R_np)
 
         # Note(rayc): the resize and padding should be done in the dataloader,along with cam_intrinsic
         img_disp_l = F.interpolate(
@@ -312,6 +302,9 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
         # Get depth error image
         pred_depth_err_np = depth_error_img(pred_depth * 1000, img_depth_l * 1000, mask)
 
+        # TODO get realsense images
+        realsense_depth_np = img_depth_realsense.squeeze(0).squeeze(0).detach().cpu().numpy()
+
         # Save images
         save_img(
             log_dir,
@@ -321,6 +314,7 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
             pred_disp_err_np,
             pred_depth_np,
             gt_depth_np,
+            realsense_depth_np,
             pred_depth_err_np,
             pred_conf,
             cam_intrinsic=cam_intrinsic,
@@ -394,3 +388,7 @@ def main():
     psmnet_model.load_state_dict(psmnet_model_dict)
 
     test(transformer_model, psmnet_model, val_loader, logger, log_dir)
+
+
+if __name__ == "__main__":
+    main()
