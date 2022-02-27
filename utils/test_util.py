@@ -98,7 +98,13 @@ def save_img(
     gt_pts = depth2pts_np(gt_depth_np * 1000, cam_intrinsic, cam_extrinsic)
     gt_pcd = o3d.geometry.PointCloud()
     gt_pcd.points = o3d.utility.Vector3dVector(gt_pts)
+
+    gt_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30),fast_normal_computation=False)
+    cam_pos = -np.matmul(cam_extrinsic[:3,:3].T,cam_extrinsic[:3,3])
+    gt_pcd.orient_normals_towards_camera_location(cam_pos)
+
     o3d.io.write_point_cloud(os.path.join(log_dir, gt_pcd_path), gt_pcd)
+
 
     # pred
     #pred_conf_color = custom_cmap(pred_conf)[..., :3]
@@ -107,6 +113,17 @@ def save_img(
     pred_pcd.points = o3d.utility.Vector3dVector(pred_pts)
     #pred_pcd.colors = o3d.utility.Vector3dVector(pred_conf_color.reshape(-1, 3))
     #o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_path), pred_pcd)
+    pred_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30),fast_normal_computation=False)
+    cam_pos = -np.matmul(cam_extrinsic[:3,:3].T,cam_extrinsic[:3,3])
+    pred_pcd.orient_normals_towards_camera_location(cam_pos)
+
+    gt_n = np.array(gt_pcd.normals)
+    pred_n = np.array(pred_pcd.normals)
+
+    angle = np.multiply(gt_n, pred_n).sum(1)
+    angle = np.arccos(angle)
+    angle = angle*180/np.pi
+    angle = np.mean(angle)
 
     dists = pred_pcd.compute_point_cloud_distance(gt_pcd)
     dists = np.asarray(dists)
@@ -114,6 +131,11 @@ def save_img(
     dists_color = cm.jet(dists)[..., :3]
     pred_pcd.colors = o3d.utility.Vector3dVector(dists_color)
     o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_err_path), pred_pcd)
+
+    unit_vector_1 = vector_1 / np.linalg.norm(vector_1)
+    unit_vector_2 = vector_2 / np.linalg.norm(vector_2)
+    dot_product = np.dot(unit_vector_1, unit_vector_2)
+    angle = np.arccos(dot_product)
 
     # realsense
     realsense_pts = depth2pts_np(realsense_depth_np * 1000, cam_intrinsic, cam_extrinsic)
@@ -168,6 +190,7 @@ def save_img(
     plt.imsave(os.path.join(log_dir, disp_abs_err_cm_path), pred_disp_err_np)
     plt.imsave(os.path.join(log_dir, depth_abs_err_cm_path), pred_depth_err_np)
     plt.close("all")
+    return angle
 
 
 def save_gan_img(img_outputs, path, nrow=2, ncol=2):

@@ -108,6 +108,7 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
         "depth_err2": 0,
         "depth_err4": 0,
         "depth_err8": 0,
+        "normal_err": 0,
     }
     total_obj_disp_err = np.zeros(cfg.SPLIT.OBJ_NUM)
     total_obj_depth_err = np.zeros(cfg.SPLIT.OBJ_NUM)
@@ -256,8 +257,9 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
             img_disp_l, img_depth_l, pred_disp, img_focal_length, img_baseline, mask
         )
         for k in total_err_metrics.keys():
-            total_err_metrics[k] += err_metrics[k]
-        logger.info(f"Test instance {prefix} - {err_metrics}")
+            if k != 'normal_err'
+                total_err_metrics[k] += err_metrics[k]
+        
 
         # Get object error
         obj_disp_err, obj_depth_err, obj_depth_4_err, obj_count = compute_obj_err(
@@ -306,7 +308,7 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
         realsense_depth_np = img_depth_realsense.squeeze(0).squeeze(0).detach().cpu().numpy()
 
         # Save images
-        save_img(
+        angle = save_img(
             log_dir,
             prefix,
             pred_disp_np,
@@ -319,6 +321,9 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
             #pred_conf,
             cam_intrinsic=cam_intrinsic,
         )
+        total_err_metrics['normal_err'] += angle
+        err_metrics['normal_err'] = angle
+        logger.info(f"Test instance {prefix} - {err_metrics}")
 
         # save cost volume
         #prob_volume = cost[0].detach().cpu().numpy()
