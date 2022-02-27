@@ -208,6 +208,7 @@ class MessytableTestDataset(Dataset):
         item['focal_length'] = torch.tensor(focal_length, dtype=torch.float32).unsqueeze(0).unsqueeze(0).unsqueeze(0)
         item['baseline'] = torch.tensor(baseline, dtype=torch.float32).unsqueeze(0).unsqueeze(0).unsqueeze(0)
         item['robot_mask'] = torch.tensor(robot_mask, dtype=torch.float32).unsqueeze(0)
+        item["intrinsic_l"] = torch.tensor(intrinsic_l, dtype=torch.float32)
 
         if self.onReal is False:
             item['img_L_real'] = normalization(img_L_rgb_real).type(torch.FloatTensor)
