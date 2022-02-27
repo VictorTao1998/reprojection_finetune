@@ -52,7 +52,7 @@ def save_img(
     pred_disp_err_np,
     pred_depth_np,
     gt_depth_np,
-    realsense_depth_np,
+    #realsense_depth_np,
     pred_depth_err_np,
     pred_conf,
     cam_intrinsic,
@@ -116,10 +116,10 @@ def save_img(
     o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_err_path), pred_pcd)
 
     # realsense
-    realsense_pts = depth2pts_np(realsense_depth_np * 1000, cam_intrinsic, cam_extrinsic)
-    realsense_pcd = o3d.geometry.PointCloud()
-    realsense_pcd.points = o3d.utility.Vector3dVector(realsense_pts)
-    o3d.io.write_point_cloud(os.path.join(log_dir, realsense_pcd_path), realsense_pcd)
+    #realsense_pts = depth2pts_np(realsense_depth_np * 1000, cam_intrinsic, cam_extrinsic)
+    #realsense_pcd = o3d.geometry.PointCloud()
+    #realsense_pcd.points = o3d.utility.Vector3dVector(realsense_pts)
+    #o3d.io.write_point_cloud(os.path.join(log_dir, realsense_pcd_path), realsense_pcd)
 
     dists = realsense_pcd.compute_point_cloud_distance(gt_pcd)
     dists = np.asarray(dists)
