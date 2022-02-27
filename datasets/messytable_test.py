@@ -1,3 +1,292 @@
+
+Online
+
+
+
+Add a channel description
+
+
+
+At 6:17 PM Saturday, February 26, isabella wrote, python test_psmnet_with_confidence.py --config-file configs/remote_test.yaml --model ../train_8_14_cascade/train1/models/model_best.pth --onreal --exclude-bg --exclude-zeros
+1 new message today
+	
+isabella
+12:42 PM
+我是指的紫色的mask
+
+	
+jianyu
+Update your status
+12:42 PM
+紫色的不是0吗
+
+	
+isabella
+12:43 PM
+对 在prediction 里面 对应的紫色区域mask掉
+
+我一会给的new pred depth
+
+	
+jianyu
+Update your status
+12:43 PM
+mask过了
+
+	
+isabella
+12:43 PM
+??
+
+zoom一下？
+
+	
+jianyu
+Update your status
+12:44 PM
+行
+
+	
+isabella
+12:44 PM
+ https://ucsd.zoom.us/j/95952636223
+
+Zoom Video
+Join our Cloud HD Video Meeting
+Zoom is the leader in modern enterprise video communications, with an easy, reliable cloud platform for video and audio conferencing, chat, and webinars across mobile, desktop, and room systems. Zoom Rooms is the original software-based conference room solution used around the world in board, con...
+	
+jianyu
+Update your status
+1:47 PM
+video_3_pred.mp4
+MP42.6MB
+video_3_realsense.mp4
+MP42.8MB
+	
+isabella
+9:57 PM
+https://drive.google.com/file/d/1HM8DSDvDvhJKBO5oLWwNJp1wxkLD0BU2/view?usp=sharing
+
+在吗 
+
+试下这个video3
+
+zoom now?
+
+	
+jianyu
+Update your status
+9:58 PM
+ok
+
+	
+isabella
+10:23 PM
+0191.png
+
+
+0000.png
+
+
+	
+isabella
+10:32 PM
+0003.png
+
+
+	
+jianyu
+Update your status
+11:39 PM
+p.py
+PY6KB
+February 03
+	
+jianyu
+Update your status
+3:52 PM
+你觉得我们应该zoom in哪些地方
+
+	
+isabella
+3:58 PM
+你觉得？
+
+	
+jianyu
+Update your status
+3:58 PM
+15s我们的model好像fill in了realsense的缺口
+
+...
+
+这是我能找出来比较明显的了
+
+	
+isabella
+3:58 PM
+我感觉现在搞有点晚了...rebuttal已经快完了
+
+	
+jianyu
+Update your status
+3:59 PM
+我不知道edward有没有传
+
+	
+isabella
+4:00 PM
+:joy: 
+
+	
+jianyu
+Update your status
+4:23 PM
+他没有传
+
+那现在还能传么
+
+万一有reviewer看到了有reviewer没看到怎么办
+
+。。
+
+	
+isabella
+4:27 PM
+那你还是先做着吧。。
+
+今晚加快搞个完整版 发群里再问一下Hao看看要不要发
+
+关键他不回复。。就很迷
+
+	
+jianyu
+Update your status
+4:30 PM
+true
+
+	
+isabella
+4:30 PM
+要不你再问问他
+
+Yesterday
+	
+jianyu
+Update your status
+9:39 PM
+那个根据deptherr来定颜色的pc code push了吗
+
+	
+isabella
+9:45 PM
+test_util.py
+PY8KB
+似乎没有...
+
+你用这个吧
+
+line 111-116
+
+np_utils.py
+PY941B
+replace原来的test_util就行了
+
+	
+jianyu
+Update your status
+10:05 PM
+ok
+
+谢啦
+
+Today
+	
+jianyu
+Update your status
+4:17 PM
+那个test script能给我一份不
+
+	
+isabella
+5:47 PM
+test_psmnet_with_confidence.py
+PY14KB
+psmnet_confidence.py
+PY9KB
+	
+jianyu
+Update your status
+5:50 PM
+hao
+
+"pip install --user open3d && sh /jianyu-fast-vol/ActiveZero/run_test.sh"
+
+这样吗
+
+	
+isabella
+5:52 PM
+en
+
+暂时可以这样 之后我还是要更新一下docker
+
+	
+jianyu
+Update your status
+5:55 PM
+item['intrinsic_l'] = torch.tensor(intrinsic_l)
+
+messytable_test
+
+里是不是要加这一行
+
+	
+isabella
+5:58 PM
+messytable_test.py
+PY12KB
+	
+jianyu
+Update your status
+5:59 PM
+ERROR:torch.distributed.elastic.multiprocessing.api:failed (exitcode: -9) local_rank: 0 (pid: 141) of binary: /opt/conda/bin/python
+ERROR:torch.distributed.elastic.agent.server.local_elastic_agent:[default] Worker group failed
+。。。
+
+这是咋回事
+
+	
+isabella
+6:01 PM
+不知道...
+
+	
+jianyu
+Update your status
+6:12 PM
+你是怎么run的
+
+distributed.launch?
+
+要不你吧整个重新发我一下吧
+
+我还是修不好
+
+	
+isabella
+6:16 PM
+test 不用distributed啊
+
+New Messages
+python test_psmnet_with_confidence.py --config-file configs/remote_test.yaml --model ../train_8_14_cascade/train1/models/model_best.pth --onreal --exclude-bg --exclude-zeros
+
+Write to isabella
+
+No file chosen
+
+isabella is typing...
+Help
 """
 Author: Isabella Liu 8/15/21
 Feature:
