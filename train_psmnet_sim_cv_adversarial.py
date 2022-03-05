@@ -241,7 +241,7 @@ def train_sample(sample, psmnet_model, discriminator,
         real_out_d = discriminator(gt_cv)#.unsqueeze(5)
         loss_d_fake = F.binary_cross_entropy(fake_out_d, torch.zeros(1).expand_as(fake_out_d).cuda())
         loss_d_real = F.binary_cross_entropy(real_out_d, torch.ones(1).expand_as(real_out_d).cuda())
-        print(torch.sum(real_out_d), torch.sum(fake_out_d), real_out_d.shape)
+        #print(torch.sum(real_out_d), torch.sum(fake_out_d), real_out_d.shape)
         #print(torch.sum(cost_vol), torch.sum(gt_cv), cost_vol.shape, gt_cv.shape)
 
         loss_discriminator = (loss_d_fake + loss_d_real) * 0.5
