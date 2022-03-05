@@ -1,12 +1,13 @@
-# Config files for local testing
+# Config files for remote testing
 
 # Directories
 DIR:
-  DATASET: '/code/dataset_local_v9/training'  #  path to your sim testing dataset
+  DATASET: '/media/jianyu/dataset/messy-table-dataset/real_v9/training/'  #  path to your sim testing dataset
 
 # Split files
 SPLIT:
-  VAL: '/code/dataset_local_v9/training_lists/all.txt'  # training lists of your sim dataset
+  VAL: '/media/jianyu/dataset/messy-table-dataset/real_v9/training_lists/all.txt'  # training lists of your sim dataset
+#  VAL: '/isabella-fast/FeatureGAN/lists/newTest.txt'  # training lists of your sim dataset
   LEFT: '0128_irL_kuafuv2_half.png'
   RIGHT: '0128_irR_kuafuv2_half.png'
   DEPTHL: 'depthL.png'
@@ -14,11 +15,13 @@ SPLIT:
   META: 'meta.pkl'
   LABEL: 'irL_label_image.png'
 
-# Real dataset
+# Configuration for testing on real dataset
 REAL:
-  DATASET_V9: '/code/real_dataset_local_v9'  # path to your real testing dataset
-  DATASET: '/code/real_dataset_local_v10'
+  DATASET_V9: '/media/jianyu/dataset/messy-table-dataset/real_data_v9/'
+  DATASET: '/media/jianyu/dataset/messy-table-dataset/real_data_v10/'  # path to your real testing dataset
   LEFT: '1024_irL_real.png'
   RIGHT: '1024_irR_real.png'
   PAD_WIDTH: 960
   PAD_HEIGHT: 544
+  MASK_FILE: '/isabella-fast/FeatureGAN/real_masks/all.txt'
+  MASK: '/isabella-fast/FeatureGAN/real_masks'

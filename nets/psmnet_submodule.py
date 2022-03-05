@@ -89,13 +89,18 @@ class DisparityRegression(nn.Module):
 
 
 class FeatureExtraction(nn.Module):
-    def __init__(self):
+    def __init__(self, transform = False):
         super(FeatureExtraction, self).__init__()
         # CNN module
         self.inplanes = 32
         # conv0_1, conv0_2, conv0_3
+        self.transform = transform
+        if transform:
+            in_channel = 6
+        else:
+            in_channel = 3
         self.firstconv = nn.Sequential(
-            convbn(6, 32, 3, 2, 1, 1),
+            convbn(in_channel, 32, 3, 2, 1, 1),
             nn.ReLU(inplace=True),
             convbn(32, 32, 3, 1, 1, 1),
             nn.ReLU(inplace=True),
@@ -163,13 +168,14 @@ class FeatureExtraction(nn.Module):
             layers.append(block(self.inplanes, planes, 1, None, pad, dilation))
         return nn.Sequential(*layers)
 
-    def forward(self, x, x_transformed):
+    def forward(self, x, x_transformed=None):
         """
         :param x:   [bs, 3, H, W]
         :return:    [bs, 32, H/4, W/4]
         """
         # Concat
-        x = torch.cat((x, x_transformed), 1)    # [bs, 6, H, W]
+        if self.transform:
+            x = torch.cat((x, x_transformed), 1)    # [bs, 6, H, W]
 
         # CNN module
         output = self.firstconv(x)
@@ -209,6 +215,7 @@ class FeatureExtraction(nn.Module):
         ), 1)
         output_feature = self.lastconv(output_feature)  # [bs, 32, H/4, W/4]
         return output_feature
+
 
 
 if __name__ == '__main__':

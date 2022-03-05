@@ -55,7 +55,7 @@ def compute_err_metric(disp_gt, depth_gt, disp_pred, focal_length, baseline, mas
 
 # Error metric for messy-table-dataset object error
 @make_nograd_func
-def compute_obj_err(disp_gt, depth_gt, disp_pred, focal_length, baseline, label, mask, obj_total_num=17):
+def compute_obj_err(disp_gt, depth_gt, disp_pred, angle, focal_length, baseline, label, mask, obj_total_num=17):
     """
     Compute error for each object instance in the scene
     :param disp_gt: GT disparity map, [bs, 1, H, W]
@@ -68,6 +68,9 @@ def compute_obj_err(disp_gt, depth_gt, disp_pred, focal_length, baseline, label,
     :return: obj_disp_err, obj_depth_err - List of error of each object
              obj_count - List of each object appear count
     """
+    #print(mask.shape, angle.shape)
+    angle = torch.tensor(angle).cuda().unsqueeze(0).unsqueeze(0)
+    
     depth_pred = focal_length * baseline / disp_pred  # in meters
 
     obj_list = label.unique()  # TODO this will cause bug if bs > 1, currently only for testing
@@ -77,6 +80,7 @@ def compute_obj_err(disp_gt, depth_gt, disp_pred, focal_length, baseline, label,
     total_obj_disp_err = np.zeros(obj_total_num)
     total_obj_depth_err = np.zeros(obj_total_num)
     total_obj_depth_4_err = np.zeros(obj_total_num)
+    total_obj_normal_err = np.zeros(obj_total_num)
     total_obj_count = np.zeros(obj_total_num)
 
     for i in range(obj_num):
@@ -88,10 +92,12 @@ def compute_obj_err(disp_gt, depth_gt, disp_pred, focal_length, baseline, label,
         obj_depth_err = torch.mean(obj_depth_err).item()
         obj_depth_diff = torch.abs(depth_gt[obj_mask * mask] - depth_pred[obj_mask * mask])
         obj_depth_err4 = obj_depth_diff[obj_depth_diff > 4e-3].numel() / obj_depth_diff.numel()
+        obj_angle_err = torch.mean(angle[obj_mask * mask])
 
         total_obj_disp_err[obj_id] += obj_disp_err
         total_obj_depth_err[obj_id] += obj_depth_err
         total_obj_depth_4_err[obj_id] += obj_depth_err4
+        total_obj_normal_err[obj_id] += obj_angle_err
         total_obj_count[obj_id] += 1
-    return total_obj_disp_err, total_obj_depth_err, total_obj_depth_4_err, total_obj_count
+    return total_obj_disp_err, total_obj_depth_err, total_obj_depth_4_err, total_obj_normal_err, total_obj_count
 

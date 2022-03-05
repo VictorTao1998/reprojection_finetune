@@ -13,12 +13,16 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.net1 = nn.Sequential(
             nn.Conv3d(inplane, 32, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(32, 32, kernel_size=3, stride=1, padding=1, dilation=1),
             #nn.LeakyReLU(0.2, True),
             nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(64, 64, kernel_size=3, stride=1, padding=1, dilation=1),
             #nn.LeakyReLU(0.2, True),
             nn.Conv3d(64, 64, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(64, 64, kernel_size=3, stride=1, padding=1, dilation=1),
             #nn.LeakyReLU(0.2, True),
-            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1, dilation=1)
+            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(128, 128, kernel_size=3, stride=1, padding=1, dilation=1)
             #nn.LeakyReLU(0.2, True)
             #nn.LeakyReLU(0.2, inplace=True)
         )

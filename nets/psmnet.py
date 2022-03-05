@@ -62,12 +62,12 @@ class hourglass(nn.Module):
 
 
 class PSMNet(nn.Module):
-    def __init__(self, maxdisp=192, loss='BCE'):
+    def __init__(self, maxdisp=192, loss='BCE', transform=False):
         super(PSMNet, self).__init__()
         self.maxdisp = maxdisp
         self.loss = loss
-
-        self.feature_extraction = FeatureExtraction()
+        self.transform = transform
+        self.feature_extraction = FeatureExtraction(transform)
 
         self.dres0 = nn.Sequential(
             convbn_3d(64, 32, 3, 1, 1),
@@ -121,9 +121,14 @@ class PSMNet(nn.Module):
             elif isinstance(m, nn.Linear):
                 m.bias.data.zero_()
 
-    def forward(self, img_L, img_R, img_L_transformed, img_R_transformed):
-        refimg_feature = self.feature_extraction(img_L, img_L_transformed)  # [bs, 32, H/4, W/4]
-        targetimg_feature = self.feature_extraction(img_R, img_R_transformed)
+    def forward(self, img_L, img_R, img_L_transformed=None, img_R_transformed=None):
+
+        if self.transform:
+            refimg_feature = self.feature_extraction(img_L, img_L_transformed)  # [bs, 32, H/4, W/4]
+            targetimg_feature = self.feature_extraction(img_R, img_R_transformed)
+        else:
+            refimg_feature = self.feature_extraction(img_L)  # [bs, 32, H/4, W/4]
+            targetimg_feature = self.feature_extraction(img_R)
 
         # Cost Volume
         [bs, feature_size, H, W] = refimg_feature.size()

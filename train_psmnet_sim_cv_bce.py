@@ -74,7 +74,7 @@ logger.info(f'Running with {num_gpus} GPUs')
 # python -m torch.distributed.launch train_psmnet_temporal_ir_reproj.py --config-file configs/remote_train_primitive_randscenes.yaml --summary-freq 10 --save-freq 100 --logdir ../train_10_21_psmnet_smooth_ir_reproj/debug --debug
 
 
-def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer,
+def train(psmnet_model, psmnet_optimizer,
           TrainImgLoader, ValImgLoader):
     for epoch_idx in range(cfg.SOLVER.EPOCHS):
         # One epoch training loop
@@ -85,13 +85,13 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
                 break
 
             # Adjust learning rate
-            adjust_learning_rate(transformer_optimizer, global_step, cfg.SOLVER.LR_CASCADE, cfg.SOLVER.LR_STEPS)
+            #adjust_learning_rate(transformer_optimizer, global_step, cfg.SOLVER.LR_CASCADE, cfg.SOLVER.LR_STEPS)
             adjust_learning_rate(psmnet_optimizer, global_step, cfg.SOLVER.LR_CASCADE, cfg.SOLVER.LR_STEPS)
 
             do_summary = global_step % args.summary_freq == 0
             # Train one sample
             scalar_outputs_psmnet, img_outputs_psmnet = \
-                train_sample(sample, transformer_model, psmnet_model, transformer_optimizer,
+                train_sample(sample, psmnet_model, 
                              psmnet_optimizer, isTrain=True)
             # Save result to tensorboard
             if (not is_distributed) or (dist.get_rank() == 0):
@@ -110,9 +110,9 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
                 if (global_step) % args.save_freq == 0:
                     checkpoint_data = {
                         'epoch': epoch_idx,
-                        'Transformer': transformer_model.state_dict(),
+                        #'Transformer': transformer_model.state_dict(),
                         'PSMNet': psmnet_model.state_dict(),
-                        'optimizerTransformer': transformer_optimizer.state_dict(),
+                        #'optimizerTransformer': transformer_optimizer.state_dict(),
                         'optimizerPSMNet': psmnet_optimizer.state_dict()
                     }
                     save_filename = os.path.join(args.logdir, 'models', f'model_{global_step}.pth')
@@ -124,13 +124,13 @@ def train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimiz
         gc.collect()
 
 
-def train_sample(sample, transformer_model, psmnet_model,
-                 transformer_optimizer, psmnet_optimizer, isTrain=True):
+def train_sample(sample, psmnet_model,
+                 psmnet_optimizer, isTrain=True):
     if isTrain:
-        transformer_model.train()
+        #transformer_model.train()
         psmnet_model.train()
     else:
-        transformer_model.eval()
+        #transformer_model.eval()
         psmnet_model.eval()
 
     # Load data
@@ -140,7 +140,7 @@ def train_sample(sample, transformer_model, psmnet_model,
     #img_R_ir_pattern = sample['img_R_ir_pattern'].to(cuda_device)
 
     # Train on simple Transformer
-    img_L_transformed, img_R_transformed = transformer_model(img_L, img_R)  # [bs, 3, H, W]
+    #img_L_transformed, img_R_transformed = transformer_model(img_L, img_R)  # [bs, 3, H, W]
 
     # Train on PSMNet
     disp_gt_l = sample['img_disp_l'].to(cuda_device)
@@ -165,7 +165,7 @@ def train_sample(sample, transformer_model, psmnet_model,
     # Get stereo loss on sim
     mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)  # Note in training we do not exclude bg
     if isTrain:
-        pred_disp1, pred_disp2, pred_disp3, cost_vol_1, cost_vol_2, cost_vol_3 = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
+        pred_disp1, pred_disp2, pred_disp3, cost_vol_1, cost_vol_2, cost_vol_3 = psmnet_model(img_L, img_R)
         sim_pred_disp = pred_disp3
         gt_disp = torch.clone(disp_gt_l).long()
         msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
@@ -201,11 +201,11 @@ def train_sample(sample, transformer_model, psmnet_model,
     # Backward on sim_ir_pattern reprojection
     sim_loss = loss_psmnet * args.loss_ratio_sim
     if isTrain:
-        transformer_optimizer.zero_grad()
+        #transformer_optimizer.zero_grad()
         psmnet_optimizer.zero_grad()
         sim_loss.backward()
         psmnet_optimizer.step()
-        transformer_optimizer.step()
+        #transformer_optimizer.step()
 
     """
     # Get reprojection loss on real
@@ -299,16 +299,10 @@ if __name__ == '__main__':
                                                    shuffle=False, num_workers=cfg.SOLVER.NUM_WORKER, drop_last=False)
 
     # Create Transformer model
-    transformer_model = Transformer().to(cuda_device)
-    transformer_optimizer = torch.optim.Adam(transformer_model.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
-    if is_distributed:
-        transformer_model = torch.nn.parallel.DistributedDataParallel(
-            transformer_model, device_ids=[args.local_rank], output_device=args.local_rank)
-    else:
-        transformer_model = torch.nn.DataParallel(transformer_model)
+
 
     # Create PSMNet model
-    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, loss='BCE').to(cuda_device)
+    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, loss='BCE', transform=False).to(cuda_device)
     psmnet_optimizer = torch.optim.Adam(psmnet_model.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
     if is_distributed:
         psmnet_model = torch.nn.parallel.DistributedDataParallel(
@@ -322,4 +316,4 @@ if __name__ == '__main__':
     
 
     # Start training
-    train(transformer_model, psmnet_model, transformer_optimizer, psmnet_optimizer, TrainImgLoader, ValImgLoader)
+    train(psmnet_model, psmnet_optimizer, TrainImgLoader, ValImgLoader)

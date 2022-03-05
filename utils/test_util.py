@@ -16,7 +16,7 @@ from .config import cfg
 from utils.np_utils import depth2pts_np
 from matplotlib import cm
 
-MAX_DIST = 10
+MAX_DIST = 0.01
 
 
 def load_from_dataparallel_model(model_pth, sub_model_name):
@@ -55,6 +55,7 @@ def save_img(
     realsense_depth_np,
     pred_depth_err_np,
     #pred_conf,
+    mask,
     cam_intrinsic,
     cam_extrinsic=np.eye(4),
 ):
@@ -95,20 +96,32 @@ def save_img(
 
     # Save points clouds
     # gt
-    gt_pts = depth2pts_np(gt_depth_np * 1000, cam_intrinsic, cam_extrinsic)
+    height, width = gt_depth_np.shape
+    mask = mask.cpu().numpy()[0][0]
+    gt_pts = depth2pts_np(gt_depth_np, cam_intrinsic, cam_extrinsic)
+    gt_pts = np.reshape(gt_pts, [gt_pts.shape[0], gt_pts.shape[1]])
+    gt_pts_img = np.reshape(gt_pts, [height, width, 3])
+    #print(gt_pts.shape)
+    
+    
     gt_pcd = o3d.geometry.PointCloud()
     gt_pcd.points = o3d.utility.Vector3dVector(gt_pts)
 
     gt_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30),fast_normal_computation=False)
     cam_pos = -np.matmul(cam_extrinsic[:3,:3].T,cam_extrinsic[:3,3])
     gt_pcd.orient_normals_towards_camera_location(cam_pos)
+    #o3d.visualization.draw_geometries([gt_pcd])
 
-    o3d.io.write_point_cloud(os.path.join(log_dir, gt_pcd_path), gt_pcd)
+    gt_pcd_visual_p = o3d.utility.Vector3dVector(gt_pts_img[mask])
+    gt_pcd_visual = o3d.geometry.PointCloud(gt_pcd_visual_p)
+    o3d.io.write_point_cloud(os.path.join(log_dir, gt_pcd_path), gt_pcd_visual)
 
 
     # pred
     #pred_conf_color = custom_cmap(pred_conf)[..., :3]
-    pred_pts = depth2pts_np(pred_depth_np * 1000, cam_intrinsic, cam_extrinsic)
+    pred_pts = depth2pts_np(pred_depth_np, cam_intrinsic, cam_extrinsic)
+    pred_pts = np.reshape(pred_pts, [pred_pts.shape[0], pred_pts.shape[1]])
+    pred_pts_img = np.reshape(pred_pts, [height, width, 3])
     pred_pcd = o3d.geometry.PointCloud()
     pred_pcd.points = o3d.utility.Vector3dVector(pred_pts)
     #pred_pcd.colors = o3d.utility.Vector3dVector(pred_conf_color.reshape(-1, 3))
@@ -117,25 +130,32 @@ def save_img(
     cam_pos = -np.matmul(cam_extrinsic[:3,:3].T,cam_extrinsic[:3,3])
     pred_pcd.orient_normals_towards_camera_location(cam_pos)
 
-    gt_n = np.array(gt_pcd.normals)
+    pred_pcd_visual_p = o3d.utility.Vector3dVector(pred_pts_img[mask])
+    pred_pcd_visual = o3d.geometry.PointCloud(pred_pcd_visual_p)
+    o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_path), pred_pcd_visual)
+
+    
     pred_n = np.array(pred_pcd.normals)
+    gt_n = np.array(gt_pcd.normals)
+    #print(gt_n[200000], pred_n[200000])
 
     angle = np.multiply(gt_n, pred_n).sum(1)
     angle = np.arccos(angle)
     angle = angle*180/np.pi
-    angle = np.mean(angle)
+    #print(angle)
+    #angle = np.mean(angle)
 
-    dists = pred_pcd.compute_point_cloud_distance(gt_pcd)
+    dists = pred_pcd_visual.compute_point_cloud_distance(gt_pcd_visual)
     dists = np.asarray(dists)
     dists = np.clip(dists, 0, MAX_DIST) / (MAX_DIST - 0)
     dists_color = cm.jet(dists)[..., :3]
-    pred_pcd.colors = o3d.utility.Vector3dVector(dists_color)
-    o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_err_path), pred_pcd)
+    pred_pcd_visual.colors = o3d.utility.Vector3dVector(dists_color)
+    o3d.io.write_point_cloud(os.path.join(log_dir, pred_pcd_err_path), pred_pcd_visual)
 
-    unit_vector_1 = vector_1 / np.linalg.norm(vector_1)
-    unit_vector_2 = vector_2 / np.linalg.norm(vector_2)
-    dot_product = np.dot(unit_vector_1, unit_vector_2)
-    angle = np.arccos(dot_product)
+    #unit_vector_1 = vector_1 / np.linalg.norm(vector_1)
+    #unit_vector_2 = vector_2 / np.linalg.norm(vector_2)
+    #dot_product = np.dot(unit_vector_1, unit_vector_2)
+    #angle = np.arccos(dot_product)
 
     # realsense
     realsense_pts = depth2pts_np(realsense_depth_np * 1000, cam_intrinsic, cam_extrinsic)
@@ -214,7 +234,7 @@ def save_gan_img(img_outputs, path, nrow=2, ncol=2):
 
 
 def save_obj_err_file(
-    total_obj_disp_err, total_obj_depth_err, total_obj_depth_4_err, log_dir
+    total_obj_disp_err, total_obj_depth_err, total_obj_depth_4_err, total_obj_normal_err, log_dir
 ):
     result = np.hstack(
         (
@@ -222,10 +242,11 @@ def save_obj_err_file(
             total_obj_disp_err[:, None],
             total_obj_depth_err[:, None],
             total_obj_depth_4_err[:, None],
+            total_obj_normal_err[:, None]
         )
     )
     result = result.astype("str").tolist()
-    head = [["     ", "disp_err", "depth_err", "depth_err_4"]]
+    head = [["     ", "disp_err", "depth_err", "depth_err_4", "normal_err"]]
     result = head + result
 
     err_file = open(os.path.join(log_dir, "obj_err.txt"), "w")
