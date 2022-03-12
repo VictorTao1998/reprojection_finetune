@@ -14,8 +14,9 @@ import torch.nn.functional as F
 
 from datasets.messytable_on_real import MessytableOnRealDataset as MessytableDataset
 from nets.psmnet import PSMNet
+from nets.psmnet_submodule import DisparityRegression
 from nets.transformer import Transformer
-from nets.discriminator import Discriminator
+from nets.discriminator import *
 from utils.cascade_metrics import compute_err_metric
 from utils.warp_ops import apply_disparity_cu
 from utils.reprojection import get_reproj_error_patch
@@ -43,6 +44,14 @@ parser.add_argument('--loss_ratio_adversarial', type=float, default=1, help='Rat
 parser.add_argument('--gaussian-blur', action='store_true',default=False, help='whether apply gaussian blur')
 parser.add_argument('--color-jitter', action='store_true',default=False, help='whether apply color jitter')
 parser.add_argument('--ps', type=int, default=11, help='Patch size of doing patch loss calculation')
+parser.add_argument('--model', type=str, default='discriminator1')
+parser.add_argument('--b1', type=float, default=0)
+parser.add_argument('--b2', type=float, default=0.9)
+parser.add_argument('--discriminatorlr', type=float, default=0.0001)
+parser.add_argument('--gradientpenalty', action='store_true', default=False)
+parser.add_argument('--clipc', type=float, default = 0.01)
+parser.add_argument('--lam', type=float, default = 10)
+parser.add_argument('--diffcv', action='store_true', default=False)
 
 args = parser.parse_args()
 cfg.merge_from_file(args.config_file)
@@ -75,7 +84,7 @@ logger.info(f'Running with {num_gpus} GPUs')
 
 
 def train(psmnet_model, psmnet_optimizer, discriminator, discriminator_optimizer,
-          TrainImgLoader, ValImgLoader):
+          TrainImgLoader, ValImgLoader, args):
     for epoch_idx in range(cfg.SOLVER.EPOCHS):
         # One epoch training loop
         avg_train_scalars_psmnet = AverageMeterDict()
@@ -97,6 +106,8 @@ def train(psmnet_model, psmnet_optimizer, discriminator, discriminator_optimizer
             # Adjust learning rate
             #adjust_learning_rate(transformer_optimizer, global_step, cfg.SOLVER.LR_CASCADE, cfg.SOLVER.LR_STEPS)
             adjust_learning_rate(psmnet_optimizer, global_step, cfg.SOLVER.LR_CASCADE, cfg.SOLVER.LR_STEPS)
+            #adjust_learning_rate(discriminator_optimizer, global_step, cfg.SOLVER.DISCRIMINATOR, cfg.SOLVER.LR_STEPS)
+
 
             do_summary = global_step % args.summary_freq == 0
             # Train one sample
@@ -104,7 +115,7 @@ def train(psmnet_model, psmnet_optimizer, discriminator, discriminator_optimizer
             #before_m = psmnet_model.parameters()
             scalar_outputs_psmnet, img_outputs_psmnet = \
                 train_sample(sample, psmnet_model, discriminator, 
-                             psmnet_optimizer, discriminator_optimizer, isTrain=True, isDis=dis, isAdv=adv)
+                             psmnet_optimizer, discriminator_optimizer, args, isTrain=True, isDis=dis, isAdv=adv)
             #after_p = discriminator.parameters()
             #after_m = psmnet_model.parameters()
             #isSameD = True
@@ -128,7 +139,8 @@ def train(psmnet_model, psmnet_optimizer, discriminator, discriminator_optimizer
                     # Update PSMNet images
                     save_images(summary_writer, 'train_psmnet', img_outputs_psmnet, global_step)
                     # Update PSMNet losses
-                    scalar_outputs_psmnet.update({'lr': psmnet_optimizer.param_groups[0]['lr']})
+                    scalar_outputs_psmnet.update({'psm_lr': psmnet_optimizer.param_groups[0]['lr']})
+                    scalar_outputs_psmnet.update({'dis_lr': discriminator_optimizer.param_groups[0]['lr']})
                     save_scalars(summary_writer, 'train_psmnet', scalar_outputs_psmnet, global_step)
 
                     total_err_metric_psmnet = avg_train_scalars_psmnet.mean()
@@ -153,7 +165,7 @@ def train(psmnet_model, psmnet_optimizer, discriminator, discriminator_optimizer
 
 
 def train_sample(sample, psmnet_model, discriminator, 
-                 psmnet_optimizer, discriminator_optimizer, isTrain=True, isDis=True, isAdv=True):
+                 psmnet_optimizer, discriminator_optimizer, args, isTrain=True, isDis=True, isAdv=True):
     if isTrain:
         psmnet_model.train()
         discriminator.train()
@@ -201,7 +213,32 @@ def train_sample(sample, psmnet_model, discriminator,
         gt_disp = torch.clone(disp_gt_l).long()
         msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
         #gt_disp[msk_gt_disp] = 0
-        gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).float().cuda().permute(0,1,4,2,3)
+        if args.diffcv:
+            disp_low = torch.floor(disp_gt_l)
+            cv_low = F.one_hot(disp_low.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
+            disp_up = torch.ceil(disp_gt_l)
+            cv_up = F.one_hot(disp_up.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
+            x = -(disp_gt_l - disp_up)
+            
+            b,c,d,h,w = cv_low.shape
+            cv_low = cv_low.permute(1,2,0,3,4)
+            cv_up = cv_up.permute(1,2,0,3,4)
+            x = x.squeeze(1)
+            low = cv_low*x
+            
+            up = cv_up*(1-x)
+            low = low.permute(2,0,1,3,4)
+            up = up.permute(2,0,1,3,4)
+            
+            gt_cv = low+up
+            gt_cv = gt_cv.cuda()
+
+            ###TEST###
+            #dsr = DisparityRegression(cfg.ARGS.MAX_DISP)
+            #rec_disp = dsr(gt_cv.squeeze(1))
+            #print(rec_disp.shape, disp_gt_l.shape, torch.sum(rec_disp != disp_gt_l))
+        else:
+            gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).float().cuda().permute(0,1,4,2,3)
         cost_vol = cost_vol.unsqueeze(1)
         #print(cost_vol.shape, gt_cv.shape)
 
@@ -216,7 +253,14 @@ def train_sample(sample, psmnet_model, discriminator,
         #print(fake_out.shape, real_out.shape)
         #with torch.no_grad():
         pred_out = discriminator(cost_vol)
-        loss_adversarial = F.binary_cross_entropy_with_logits(pred_out, torch.ones(1).expand_as(pred_out).cuda())
+        #print(pred_out.shape)
+        if args.model == 'discriminator1' or args.model == 'discriminator2':
+            if args.gradientpenalty:
+                loss_adversarial = torch.mean(-pred_out)
+            else:
+                loss_adversarial = F.binary_cross_entropy_with_logits(pred_out, torch.ones(1).expand_as(pred_out).cuda())
+        elif args.model == 'critic1' or args.model == 'critic2':
+            loss_adversarial = torch.mean(pred_out)
 
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
         #loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
@@ -237,22 +281,81 @@ def train_sample(sample, psmnet_model, discriminator,
 
 
         set_requires_grad([discriminator], True)
-        fake_out_d = discriminator(cost_vol.detach())#.unsqueeze(5)
-        real_out_d = discriminator(gt_cv)#.unsqueeze(5)
-        loss_d_fake = F.binary_cross_entropy(fake_out_d, torch.zeros(1).expand_as(fake_out_d).cuda())
-        loss_d_real = F.binary_cross_entropy(real_out_d, torch.ones(1).expand_as(real_out_d).cuda())
-        #print(torch.sum(real_out_d), torch.sum(fake_out_d), real_out_d.shape)
-        #print(torch.sum(cost_vol), torch.sum(gt_cv), cost_vol.shape, gt_cv.shape)
+        if isDis:
+            discriminator_optimizer.zero_grad()
+        cost_vol = cost_vol.detach()
 
-        loss_discriminator = (loss_d_fake + loss_d_real) * 0.5
+        print(cost_vol.shape, gt_cv.shape)
+        
+
+        if args.model == 'discriminator1' or args.model == 'discriminator2':
+            if args.gradientpenalty:
+                
+                cost_vol_clone = torch.clone(cost_vol)
+                cost_vol_clone.requires_grad = True
+
+                epsilon = torch.rand(1).to(cuda_device)
+                cost_vol_hat = epsilon*gt_cv + (1-epsilon)*cost_vol_clone
+
+                fake_out_d = discriminator(cost_vol_clone)#.unsqueeze(5)
+                loss_fake_d = torch.mean(fake_out_d).unsqueeze(0)
+                #print(loss_fake_d.unsqueeze(0).shape, fake_out_d.shape, one.shape)
+                loss_fake_d.backward()
+
+                real_out_d = discriminator(gt_cv)#.unsqueeze(5)
+                loss_real_d = -torch.mean(real_out_d).unsqueeze(0)
+                loss_real_d.backward()
+
+                cost_vol_hat = torch.autograd.Variable(cost_vol_hat, requires_grad=True)
+                disc_out = discriminator(cost_vol_hat)
+
+                gradient = torch.autograd.grad(disc_out, cost_vol_hat, grad_outputs=torch.ones_like(disc_out).to(cuda_device), create_graph=True, 
+                        retain_graph=True, only_inputs=True)
+                gradient = torch.reshape(gradient[0],(2,1,192,-1))
+                gnorm = torch.linalg.matrix_norm(gradient)
+                
+                #print(fake_out_d.shape, real_out_d.shape, gnorm.shape, gradient[0].shape)
+                loss_gradient = args.lam*torch.mean(torch.pow((gnorm - 1),2))
+                loss_gradient.backward()
+
+                loss_discriminator = loss_fake_d + loss_real_d + loss_gradient
+           
+            else:
+                fake_out_d = discriminator(cost_vol)#.unsqueeze(5)
+
+                real_out_d = discriminator(gt_cv)#.unsqueeze(5)
+
+                loss_d_fake = F.binary_cross_entropy(fake_out_d, torch.zeros(1).expand_as(fake_out_d).cuda())
+                loss_d_real = F.binary_cross_entropy(real_out_d, torch.ones(1).expand_as(real_out_d).cuda())
+                print(torch.sum(real_out_d).item(), torch.sum(fake_out_d).item(), real_out_d.shape)
+                #print(torch.sum(cost_vol), torch.sum(gt_cv), cost_vol.shape, gt_cv.shape)
+
+                loss_discriminator = (loss_d_fake + loss_d_real) * 0.5
+                loss_discriminator.backward()
+        
+        elif args.model == 'critic1' or args.model == 'critic2':
+            fake_out_d = discriminator(cost_vol)#.unsqueeze(5)
+            loss_fake_d = -torch.mean(fake_out_d).unsqueeze(0)
+            loss_fake_d.backward()
+
+            real_out_d = discriminator(gt_cv)#.unsqueeze(5)
+            loss_real_d = torch.mean(real_out_d).unsqueeze(0)
+            loss_real_d.backward()
+
+            loss_discriminator = loss_fake_d - loss_real_d
+            w_d = loss_real_d - loss_fake_d
+        
+        else:
+            raise Exception(NotImplementedError)
 
         if isDis:
-
-            discriminator_optimizer.zero_grad()
-            loss_discriminator.backward()
             #for param in discriminator.parameters():
             #    print(param.grad.data.sum())
             discriminator_optimizer.step()
+            if args.model == 'critic1' or args.model == 'critic2':
+                with torch.no_grad():
+                    for param in discriminator.parameters():
+                        param.clamp_(-args.clipc, args.clipc)
 
     else:
         with torch.no_grad():
@@ -319,6 +422,8 @@ def train_sample(sample, psmnet_model, discriminator,
                              #'sim_reprojection_loss': sim_ir_reproj_loss.item()
                              #'real_reprojection_loss': real_ir_reproj_loss.item()
                             }
+    if args.model == 'critic1' or args.model == 'critic2':
+        scalar_outputs_psmnet['w_distance'] = w_d.item()
     err_metrics = compute_err_metric(disp_gt_l,
                                      depth_gt,
                                      pred_disp,
@@ -377,8 +482,23 @@ if __name__ == '__main__':
     else:
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
-    discriminator = Discriminator(inplane=1, outplane=1).to(cuda_device)
-    discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.9, 0.999))
+    if args.model == 'discriminator1':
+        discriminator = Discriminator(inplane=1, outplane=1).to(cuda_device)
+    elif args.model == 'discriminator2':
+        discriminator = Discriminator2(inplane=1, outplane=1).to(cuda_device)
+    elif args.model == 'critic1':
+        discriminator = Critic(inplane=1, outplane=1).to(cuda_device)
+    elif args.model == 'critic2':
+        discriminator = Critic2(inplane=1, outplane=1).to(cuda_device)
+    else:
+        raise Exception(NotImplementedError)
+    #discriminator = NLayerDiscriminator()
+    if args.model == 'critic1' or args.model == 'critic2':
+        discriminator_optimizer = torch.optim.RMSprop(discriminator.parameters(), lr=args.discriminatorlr)
+    elif args.model == 'discriminator1' or args.model == 'discriminator2':
+        discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=args.discriminatorlr, betas=(args.b1, args.b2))
+    else:
+        raise Exception(NotImplementedError)
     if is_distributed:
         discriminator = torch.nn.parallel.DistributedDataParallel(
             discriminator, device_ids=[args.local_rank], output_device=args.local_rank)
@@ -391,4 +511,4 @@ if __name__ == '__main__':
     
 
     # Start training
-    train(psmnet_model, psmnet_optimizer, discriminator, discriminator_optimizer, TrainImgLoader, ValImgLoader)
+    train(psmnet_model, psmnet_optimizer, discriminator, discriminator_optimizer, TrainImgLoader, ValImgLoader, args)

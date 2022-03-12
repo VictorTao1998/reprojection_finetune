@@ -140,8 +140,12 @@ def save_img(
     #print(gt_n[200000], pred_n[200000])
 
     angle = np.multiply(gt_n, pred_n).sum(1)
-    angle = np.arccos(angle)
-    angle = angle*180/np.pi
+    angle = np.clip(angle, -1., 1.)
+    
+    angle_out = np.arccos(angle)
+    #mask = np.isnan(angle_out)
+    #print(angle[mask][0], np.arccos(angle[mask]))
+    angle_out = angle_out*180/np.pi
     #print(angle)
     #angle = np.mean(angle)
 
@@ -210,7 +214,7 @@ def save_img(
     plt.imsave(os.path.join(log_dir, disp_abs_err_cm_path), pred_disp_err_np)
     plt.imsave(os.path.join(log_dir, depth_abs_err_cm_path), pred_depth_err_np)
     plt.close("all")
-    return angle
+    return angle_out
 
 
 def save_gan_img(img_outputs, path, nrow=2, ncol=2):

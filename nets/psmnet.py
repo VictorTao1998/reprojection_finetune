@@ -182,6 +182,7 @@ class PSMNet(nn.Module):
         # For your information: This formulation 'softmax(c)' learned "similarity"
         # while 'softmax(-c)' learned 'matching cost' as mentioned in the paper.
         # However, 'c' or '-c' do not affect the performance because feature-based cost volume provided flexibility.
+        #print(cost3.shape)
         pred3 = DisparityRegression(self.maxdisp)(cost3)
 
         if self.training and self.loss == 'BCE':

@@ -51,6 +51,7 @@ _C.REAL.MASK = '/code/real_masks'
 # Solver args
 _C.SOLVER = CN()
 _C.SOLVER.LR_CASCADE = 0.001            # base learning rate for cascade
+_C.SOLVER.DISCRIMINATOR = 0.0001
 _C.SOLVER.LR_G = 0.0002                 # base learning rate for G
 _C.SOLVER.LR_D = 0.0002                 # base learning rate for D
 _C.SOLVER.LR_EPOCHS = '5,10,15:2'       # the epochs to decay lr: the downscale rate

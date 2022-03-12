@@ -97,7 +97,7 @@ real_obj_id = [4, 5, 7, 9, 13, 14, 15, 16]
 # python test_psmnet_with_confidence.py --config-file configs/remote_test.yaml --model ../train_8_14_cascade/train1/models/model_best.pth --onreal --exclude-bg --exclude-zeros --debug --gan-model
 
 
-def test(psmnet_model, val_loader, logger, log_dir):
+def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
     #transformer_model.eval()
     psmnet_model.eval()
     total_err_metrics = {
@@ -128,7 +128,6 @@ def test(psmnet_model, val_loader, logger, log_dir):
     os.mkdir(os.path.join(log_dir, "prob_volume"))
 
     for iteration, data in enumerate(tqdm(val_loader)):
-        
         img_L = data["img_L"].cuda()  # [bs, 1, H, W]
         img_R = data["img_R"].cuda()
 
@@ -195,8 +194,8 @@ def test(psmnet_model, val_loader, logger, log_dir):
                 align_corners=False,
             )
 
-        #with torch.no_grad():
-        #    img_L_transformed, img_R_transformed = transformer_model(img_L, img_R)
+        with torch.no_grad():
+            img_L_transformed, img_R_transformed = transformer_model(img_L, img_R)
 
         # Pad the imput image and depth disp image to 960 * 544
         right_pad = cfg.REAL.PAD_WIDTH - 960
@@ -207,7 +206,7 @@ def test(psmnet_model, val_loader, logger, log_dir):
         img_R = F.pad(
             img_R, (0, right_pad, top_pad, 0, 0, 0, 0, 0), mode="constant", value=0
         )
-        """
+    
         img_L_transformed = F.pad(
             img_L_transformed,
             (0, right_pad, top_pad, 0, 0, 0, 0, 0),
@@ -220,7 +219,7 @@ def test(psmnet_model, val_loader, logger, log_dir):
             mode="constant",
             value=0,
         )
-        """
+    
 
         #robot_mask = img_robot_mask == 0
         if args.exclude_bg:
@@ -247,7 +246,7 @@ def test(psmnet_model, val_loader, logger, log_dir):
 
         with torch.no_grad():#, pred_conf, cost
             pred_disp = psmnet_model(
-                img_L, img_R#, img_L_transformed, img_R_transformed
+                img_L, img_R, img_L_transformed, img_R_transformed
             )
         pred_disp = pred_disp[
             :, :, top_pad:, :
@@ -311,7 +310,6 @@ def test(psmnet_model, val_loader, logger, log_dir):
             mask,
             cam_intrinsic=cam_intrinsic,
         )
-        #print(np.sum(np.isnan(angle)))
         
         #print(angle.shape)
         angle = np.reshape(angle, (gt_depth_np.shape[-2],gt_depth_np.shape[-1]))
@@ -404,14 +402,14 @@ def main():
 
     # Get cascade model
     logger.info(f"Loaded the checkpoint: {args.model}")
-    #transformer_model = Transformer().to(cuda_device)
-    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, transform=False).to(cuda_device)
-    #transformer_model_dict = load_from_dataparallel_model(args.model, "Transformer")
-    #transformer_model.load_state_dict(transformer_model_dict)
+    transformer_model = Transformer().to(cuda_device)
+    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, transform=True).to(cuda_device)
+    transformer_model_dict = load_from_dataparallel_model(args.model, "Transformer")
+    transformer_model.load_state_dict(transformer_model_dict)
     psmnet_model_dict = load_from_dataparallel_model(args.model, "PSMNet")
     psmnet_model.load_state_dict(psmnet_model_dict)
 
-    test(psmnet_model, val_loader, logger, log_dir)
+    test(transformer_model, psmnet_model, val_loader, logger, log_dir)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ REAL:
 # Solver args
 SOLVER:
   LR_CASCADE: 0.001                         # base learning rate for cascade
+  DISCRIMINATOR: 0.0001
   LR_G: 0.0002                              # base learning rate for G
   LR_D: 0.0002                              # base learning rate for D
   LR_GAN_STEPS: '10000, 20000, 30000:10'
