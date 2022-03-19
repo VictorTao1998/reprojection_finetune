@@ -52,6 +52,7 @@ parser.add_argument('--gradientpenalty', action='store_true', default=False)
 parser.add_argument('--clipc', type=float, default = 0.01)
 parser.add_argument('--lam', type=float, default = 10)
 parser.add_argument('--diffcv', action='store_true', default=False)
+parser.add_argument('--kernel', type=int, default=3)
 
 args = parser.parse_args()
 cfg.merge_from_file(args.config_file)
@@ -285,7 +286,7 @@ def train_sample(sample, psmnet_model, discriminator,
             discriminator_optimizer.zero_grad()
         cost_vol = cost_vol.detach()
 
-        print(cost_vol.shape, gt_cv.shape)
+        #print(cost_vol.shape, gt_cv.shape)
         
 
         if args.model == 'discriminator1' or args.model == 'discriminator2':
@@ -327,7 +328,7 @@ def train_sample(sample, psmnet_model, discriminator,
 
                 loss_d_fake = F.binary_cross_entropy(fake_out_d, torch.zeros(1).expand_as(fake_out_d).cuda())
                 loss_d_real = F.binary_cross_entropy(real_out_d, torch.ones(1).expand_as(real_out_d).cuda())
-                print(torch.sum(real_out_d).item(), torch.sum(fake_out_d).item(), real_out_d.shape)
+                #print(torch.sum(real_out_d).item(), torch.sum(fake_out_d).item(), real_out_d.shape)
                 #print(torch.sum(cost_vol), torch.sum(gt_cv), cost_vol.shape, gt_cv.shape)
 
                 loss_discriminator = (loss_d_fake + loss_d_real) * 0.5
@@ -483,9 +484,9 @@ if __name__ == '__main__':
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
     if args.model == 'discriminator1':
-        discriminator = Discriminator(inplane=1, outplane=1).to(cuda_device)
+        discriminator = Discriminator(inplane=1, outplane=1, kernel=args.kernel).to(cuda_device)
     elif args.model == 'discriminator2':
-        discriminator = Discriminator2(inplane=1, outplane=1).to(cuda_device)
+        discriminator = Discriminator2(inplane=1, outplane=1, kernel=args.kernel).to(cuda_device)
     elif args.model == 'critic1':
         discriminator = Critic(inplane=1, outplane=1).to(cuda_device)
     elif args.model == 'critic2':

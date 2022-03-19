@@ -2,24 +2,20 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 
-cv = np.zeros([4,2,2])
-disp = torch.tensor([[1.3,2.6],[3,0.2]])
+a = np.linspace(0,4,5)
+w = 256
+h = 512
+d = 192
+x = cost_p = np.array(list(map(list, list(np.ndindex(d,w,h))))).reshape(d,w,h,3)
+print(x)
+#result = np.zeros([d,w,h,3])
+#result[:,:,:,2] = z
 
 
-disp_low = torch.floor(disp)
-cv_low = F.one_hot(disp_low.long(), num_classes=4).float().permute(2,0,1)
+    
+    
 
 
-disp_up = torch.ceil(disp)
-cv_up = F.one_hot(disp_up.long(), num_classes=4).float().permute(2,0,1)
+#print(result)
 
-
-
-x = -(disp - disp_up)
-low = cv_low*x
-up = cv_up*(1-x)
-gt_cv = low+up
-print(gt_cv.permute(1,2,0))
-
-maxdisp = 4
 

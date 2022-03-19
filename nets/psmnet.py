@@ -190,7 +190,7 @@ class PSMNet(nn.Module):
         elif self.training:
             return pred1, pred2, pred3
         else:
-            return pred3
+            return pred3, cost3
 
 
 if __name__ == '__main__':

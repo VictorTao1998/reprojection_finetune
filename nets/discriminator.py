@@ -56,16 +56,18 @@ class NLayerDiscriminator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, inplane, outplane):
+    def __init__(self, inplane, outplane, kernel):
         super(Discriminator, self).__init__()
+        assert kernel%2==1
+        padding = int(kernel/2)
         self.net1 = nn.Sequential(
-            nn.Conv3d(inplane, 32, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(inplane, 32, kernel_size=kernel, stride=2, padding=padding, dilation=1),
             nn.LeakyReLU(0.2, True),
-            nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(32, 64, kernel_size=kernel, stride=2, padding=padding, dilation=1),
             nn.LeakyReLU(0.2, True),
-            nn.Conv3d(64, 64, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(64, 64, kernel_size=kernel, stride=2, padding=padding, dilation=1),
             nn.LeakyReLU(0.2, True),
-            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1, dilation=1),
+            nn.Conv3d(64, 128, kernel_size=kernel, stride=2, padding=padding, dilation=1),
             #nn.Conv3d(256, 512, kernel_size=3, stride=1, padding=1, dilation=1)
             nn.LeakyReLU(0.2, True)
             #nn.LeakyReLU(0.2, inplace=True)
@@ -92,20 +94,22 @@ class Discriminator(nn.Module):
         return output
 
 class Discriminator2(nn.Module):
-    def __init__(self, inplane, outplane):
+    def __init__(self, inplane, outplane, kernel):
         super(Discriminator2, self).__init__()
+        assert kernel%2==1
+        padding = int(kernel/2)
         self.net1 = nn.Sequential(
-            nn.Conv3d(inplane, 32, kernel_size=3, stride=2, padding=1, dilation=1),
-            nn.Conv3d(32, 32, kernel_size=3, stride=1, padding=1, dilation=1),
+            nn.Conv3d(inplane, 32, kernel_size=kernel, stride=2, padding=padding, dilation=1),
+            nn.Conv3d(32, 32, kernel_size=kernel, stride=1, padding=padding, dilation=1),
             nn.LeakyReLU(0.2, True),
-            nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1, dilation=1),
-            nn.Conv3d(64, 64, kernel_size=3, stride=1, padding=1, dilation=1),
+            nn.Conv3d(32, 64, kernel_size=kernel, stride=2, padding=padding, dilation=1),
+            nn.Conv3d(64, 64, kernel_size=kernel, stride=1, padding=padding, dilation=1),
             nn.LeakyReLU(0.2, True),
-            nn.Conv3d(64, 64, kernel_size=3, stride=2, padding=1, dilation=1),
-            nn.Conv3d(64, 64, kernel_size=3, stride=1, padding=1, dilation=1),
+            nn.Conv3d(64, 64, kernel_size=kernel, stride=2, padding=padding, dilation=1),
+            nn.Conv3d(64, 64, kernel_size=kernel, stride=1, padding=padding, dilation=1),
             nn.LeakyReLU(0.2, True),
-            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1, dilation=1),
-            nn.Conv3d(128, 128, kernel_size=3, stride=1, padding=1, dilation=1),
+            nn.Conv3d(64, 128, kernel_size=kernel, stride=2, padding=padding, dilation=1),
+            nn.Conv3d(128, 128, kernel_size=kernel, stride=1, padding=padding, dilation=1),
             #nn.Conv3d(256, 512, kernel_size=3, stride=1, padding=1, dilation=1)
             nn.LeakyReLU(0.2, True)
             #nn.LeakyReLU(0.2, inplace=True)

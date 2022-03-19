@@ -10,9 +10,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-
+from matplotlib import cm
 from datasets.messytable_test_local import get_test_loader
-
+import open3d as o3d
+from np_utils import *
 # from nets.psmnet import PSMNet
 from nets.psmnet import PSMNet
 from nets.transformer import Transformer
@@ -93,6 +94,12 @@ if args.gan_model == "":
 # Calculate error for real and 3D printed objects
 real_obj_id = [4, 5, 7, 9, 13, 14, 15, 16]
 
+space = 1
+index_p = np.array([list(x) for x in np.ndindex(192,544,960)])*space
+cost_vol_p = o3d.utility.Vector3dVector(index_p)
+cost_vol_pcd = o3d.geometry.PointCloud(cost_vol_p)
+#index_p = 
+
 # python test_psmnet_with_confidence.py --model /code/models/model_4.pth --onreal --exclude-bg --exclude-zeros
 # python test_psmnet_with_confidence.py --config-file configs/remote_test.yaml --model ../train_8_14_cascade/train1/models/model_best.pth --onreal --exclude-bg --exclude-zeros --debug --gan-model
 
@@ -116,6 +123,7 @@ def test(psmnet_model, val_loader, logger, log_dir):
     total_obj_normal_err = np.zeros(cfg.SPLIT.OBJ_NUM)
     total_obj_count = np.zeros(cfg.SPLIT.OBJ_NUM)
     os.mkdir(os.path.join(log_dir, "pred_disp"))
+    os.mkdir(os.path.join(log_dir, "cost_vol_pcd"))
     os.mkdir(os.path.join(log_dir, "gt_disp"))
     os.mkdir(os.path.join(log_dir, "pred_disp_abs_err_cmap"))
     os.mkdir(os.path.join(log_dir, "pred_depth"))
@@ -246,7 +254,7 @@ def test(psmnet_model, val_loader, logger, log_dir):
         )
 
         with torch.no_grad():#, pred_conf, cost
-            pred_disp = psmnet_model(
+            pred_disp, cost_vol = psmnet_model(
                 img_L, img_R#, img_L_transformed, img_R_transformed
             )
         pred_disp = pred_disp[
@@ -264,7 +272,16 @@ def test(psmnet_model, val_loader, logger, log_dir):
             if k != 'normal_err':
                 total_err_metrics[k] += err_metrics[k]
         
+        b,d,w,h = cost_vol.shape
+        
+        
 
+        cost_c = cost_vol.cpu().numpy().reshape(d*w*h,1)
+        cost_color = cm.jet(cost_c)[..., :3].squeeze(axis=1)
+        cost_vol_pcd.colors = o3d.utility.Vector3dVector(cost_color)
+        o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '.ply'), cost_vol_pcd)
+        #print(cost_vol.shape, index_p.shape, cost_c.shape, cost_color.shape)
+        #assert 1==0
 
         # Get disparity image
         pred_disp_np = pred_disp.squeeze(0).squeeze(0).detach().cpu().numpy()  # [H, W]

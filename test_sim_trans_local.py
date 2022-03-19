@@ -10,6 +10,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
+import open3d as o3d
+from matplotlib import cm
+from utils.np_utils import *
 
 from datasets.messytable_test_local import get_test_loader
 
@@ -83,6 +86,11 @@ parser.add_argument(
     "--local_rank", type=int, default=0, help="Rank of device in distributed training"
 )
 
+space = 1
+index_p = np.array([list(x) for x in np.ndindex(192,544,960)])*space
+#cost_vol_p = o3d.utility.Vector3dVector(index_p)
+
+
 args = parser.parse_args()
 cfg.merge_from_file(args.config_file)
 cuda_device = torch.device("cuda:{}".format(args.local_rank))
@@ -117,6 +125,7 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
     total_obj_count = np.zeros(cfg.SPLIT.OBJ_NUM)
     os.mkdir(os.path.join(log_dir, "pred_disp"))
     os.mkdir(os.path.join(log_dir, "gt_disp"))
+    os.mkdir(os.path.join(log_dir, "cost_vol_pcd"))
     os.mkdir(os.path.join(log_dir, "pred_disp_abs_err_cmap"))
     os.mkdir(os.path.join(log_dir, "pred_depth"))
     os.mkdir(os.path.join(log_dir, "gt_depth"))
@@ -245,9 +254,10 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
         )
 
         with torch.no_grad():#, pred_conf, cost
-            pred_disp = psmnet_model(
+            pred_disp, cost_vol = psmnet_model(
                 img_L, img_R, img_L_transformed, img_R_transformed
             )
+            print("max: ", torch.max(pred_disp))
         pred_disp = pred_disp[
             :, :, top_pad:, :
         ]  # TODO: if right_pad > 0 it needs to be (:-right_pad)
@@ -263,6 +273,57 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
             if k != 'normal_err':
                 total_err_metrics[k] += err_metrics[k]
         
+        b,d,w,h = cost_vol.shape
+
+        frustum_point = np.zeros([d*w*h,3])
+        for disp in range(1, d):
+            c_layer = (np.ones([w,h])*disp).astype(float)
+            c_layer = c_layer[top_pad:, :]
+            #print(c_layer.shape, img_focal_length.cpu().numpy()[0,0,0,0], img_baseline.cpu().numpy()[0,0,0,0])
+            c_depth = img_focal_length.cpu().numpy()[0,0,0,0] * img_baseline.cpu().numpy()[0,0,0,0] / c_layer
+            c_pts = depth2pts_np(c_depth, cam_intrinsic, np.eye(4))
+            c_pts = np.reshape(c_pts, [c_pts.shape[0], c_pts.shape[1]])
+            
+            #print(c_pts.shape)
+            frustum_point[disp*c_pts.shape[0]:(disp+1)*c_pts.shape[0],:] = c_pts
+        
+        
+        frustum_point = frustum_point.reshape([-1,3])[c_pts.shape[0]:,:]
+        #print(frustum_point.shape)
+        
+        cost_c = cost_vol.cpu().numpy().reshape(d*w*h,1)
+        #print(np.max(cost_c), np.min(cost_c))
+        nonzeromask = (cost_c[:,0] > 1e-4)
+        
+        frustum_c = cost_c[c_pts.shape[0]:,:]
+        nonzeromask_frustum = (frustum_c[:,0] > 1e-4)
+        #print(frustum_c.shape, frustum_point.shape)
+        cost_c = cost_c[nonzeromask,:]
+        frustum_c = frustum_c[nonzeromask_frustum,:]
+        #print(np.max(cost_c), np.min(cost_c))
+        #print(frustum_point.shape,nonzeromask_frustum.shape)
+        #print(np.sum(frustum_point!=0), frustum_point.shape)
+        frustum_point = frustum_point[nonzeromask_frustum, :]
+        #print(np.sum(frustum_point!=0))
+        #print(frustum_point.shape)
+        cost_point = index_p[nonzeromask,:]
+        cost_color = cm.jet(cost_c)[..., :3].squeeze(axis=1)
+        frustum_color = cm.jet(frustum_c)[..., :3].squeeze(axis=1)
+
+        cost_vol_pcd = o3d.geometry.PointCloud()
+        frustum_pcd = o3d.geometry.PointCloud()
+
+        cost_vol_pcd.points = o3d.utility.Vector3dVector(cost_point)
+        cost_vol_pcd.colors = o3d.utility.Vector3dVector(cost_color)
+
+        #frustum_point = frustum_point.astype(int)
+        #print(cost_point.dtype, frustum_point.dtype, frustum_color.shape)
+        
+        frustum_pcd.points = o3d.utility.Vector3dVector(frustum_point)
+        frustum_pcd.colors = o3d.utility.Vector3dVector(frustum_color)
+        
+        o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '.ply'), cost_vol_pcd)
+        o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + 'frustum.ply'), frustum_pcd)
 
 
         # Get disparity image

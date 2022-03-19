@@ -25,3 +25,8 @@ def get_pixel_grids_np(height, width):
     grid = np.concatenate([x_coordinates, y_coordinates, ones], axis=0)
 
     return grid
+
+if __name__ == "__main__":
+    feature_grid = get_pixel_grids_np(2, 4)
+
+    print(feature_grid)
