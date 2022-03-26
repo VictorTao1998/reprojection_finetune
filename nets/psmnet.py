@@ -6,6 +6,7 @@ Feature: Hourglass and PSMNet (stacked hourglass) module
 import math
 
 from .psmnet_submodule import *
+from torch.autograd import Variable
 
 
 class hourglass(nn.Module):
@@ -62,12 +63,16 @@ class hourglass(nn.Module):
 
 
 class PSMNet(nn.Module):
-    def __init__(self, maxdisp=192, loss='BCE', transform=False):
+    def __init__(self, maxdisp=192, loss='BCE', transform=False, isdisp=True, max_depth=1.5):
         super(PSMNet, self).__init__()
         self.maxdisp = maxdisp
         self.loss = loss
         self.transform = transform
         self.feature_extraction = FeatureExtraction(transform)
+        self.isdisp = isdisp
+        self.maxdepth = max_depth
+        self.down = 2
+        self.n_depth = torch.arange(0.01, 0.01 + max_depth, 0.01).shape[0]
 
         self.dres0 = nn.Sequential(
             convbn_3d(64, 32, 3, 1, 1),
@@ -121,7 +126,43 @@ class PSMNet(nn.Module):
             elif isinstance(m, nn.Linear):
                 m.bias.data.zero_()
 
-    def forward(self, img_L, img_R, img_L_transformed=None, img_R_transformed=None):
+    def warp(self, x, calib):
+        """
+        warp an image/tensor (im2) back to im1, according to the optical flow
+        x: [B, C, D, H, W] (im2)
+        flo: [B, 2, H, W] flow
+        """
+        # B,C,D,H,W to B,H,W,C,D
+        x = x.transpose(1, 3).transpose(2, 4)
+        B, H, W, C, D = x.size()
+        x = x.view(B, -1, C, D)
+        # mesh grid
+        xx = (calib / (self.down * 4.))[:, None] / torch.arange(0.01, 0.01 + self.maxdepth / self.down, 0.01,
+                                                                device='cuda').float()[None, :]
+        #new_D = self.maxdepth // self.down
+        #print(xx.shape)
+        new_D = xx.shape[-1]
+
+        xx = xx.view(B, 1, new_D).repeat(1, C, 1)
+        xx = xx.view(B, C, new_D, 1)
+        yy = torch.arange(0, C, device='cuda').view(-1, 1).repeat(1, new_D).float()
+        yy = yy.view(1, C, new_D, 1).repeat(B, 1, 1, 1)
+        grid = torch.cat((xx, yy), -1).float()
+
+        vgrid = Variable(grid)
+
+        # scale grid to [-1,1]
+        vgrid[:, :, :, 0] = 2.0 * vgrid[:, :, :, 0] / max(D - 1, 1) - 1.0
+        vgrid[:, :, :, 1] = 2.0 * vgrid[:, :, :, 1] / max(C - 1, 1) - 1.0
+
+        if float(torch.__version__[:3])>1.2:
+            output = nn.functional.grid_sample(x, vgrid, align_corners=True).contiguous()
+        else:
+            output = nn.functional.grid_sample(x, vgrid).contiguous()
+        output = output.view(B, H, W, C, new_D).transpose(1, 3).transpose(2, 4)
+        return output.contiguous()
+
+    def forward(self, img_L, img_R, calib=None, img_L_transformed=None, img_R_transformed=None):
 
         if self.transform:
             refimg_feature = self.feature_extraction(img_L, img_L_transformed)  # [bs, 32, H/4, W/4]
@@ -143,11 +184,15 @@ class PSMNet(nn.Module):
                 cost[:, feature_size:, i, :, :] = targetimg_feature
         cost = cost.contiguous()  # [bs, fs*2, max_disp/4, H/4, W/4]
 
+        if self.isdisp == False:
+            cost = self.warp(cost, calib)
+
         #print(cost.shape)
         cost0 = self.dres0(cost)
         cost0 = self.dres1(cost0) + cost0
 
         out1, pre1, post1 = self.dres2(cost0, None, None)
+        #print(out1.shape, cost0.shape)
         out1 = out1 + cost0
 
         out2, pre2, post2 = self.dres3(out1, pre1, post1)
@@ -163,19 +208,31 @@ class PSMNet(nn.Module):
         if self.training:
             # cost1 = F.upsample(cost1, [self.maxdisp,img_L.size()[2],img_L.size()[3]], mode='trilinear')
             # cost2 = F.upsample(cost2, [self.maxdisp,img_L.size()[2],img_L.size()[3]], mode='trilinear')
-            cost1 = F.interpolate(cost1, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
-            cost2 = F.interpolate(cost2, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
-
+            if self.isdisp:
+                cost1 = F.interpolate(cost1, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
+                cost2 = F.interpolate(cost2, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
+            else:
+                cost1 = F.interpolate(cost1, (self.n_depth, 4 * H, 4 * W), mode='trilinear', align_corners=False)
+                cost2 = F.interpolate(cost2, (self.n_depth, 4 * H, 4 * W), mode='trilinear', align_corners=False)
             cost1 = torch.squeeze(cost1, 1)
             cost1 = F.softmax(cost1, dim=1)
-            pred1 = DisparityRegression(self.maxdisp)(cost1)
+            if self.isdisp:
+                pred1 = DisparityRegression(self.maxdisp)(cost1)
+            else:
+                pred1 = DepthRegression(self.maxdepth)(cost1)
 
             cost2 = torch.squeeze(cost2, 1)
             cost2 = F.softmax(cost2, dim=1)
-            pred2 = DisparityRegression(self.maxdisp)(cost2)
+            if self.isdisp:
+                pred2 = DisparityRegression(self.maxdisp)(cost2)
+            else:
+                pred2 = DepthRegression(self.maxdepth)(cost2)
 
         # cost3 = F.upsample(cost3, [self.maxdisp,img_L.size()[2],img_L.size()[3]], mode='trilinear')
-        cost3 = F.interpolate(cost3, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
+        if self.isdisp:
+            cost3 = F.interpolate(cost3, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
+        else:
+            cost3 = F.interpolate(cost3, (self.n_depth, 4 * H, 4 * W), mode='trilinear', align_corners=False)
         cost3 = torch.squeeze(cost3, 1)
         cost3 = F.softmax(cost3, dim=1)
 
@@ -183,7 +240,10 @@ class PSMNet(nn.Module):
         # while 'softmax(-c)' learned 'matching cost' as mentioned in the paper.
         # However, 'c' or '-c' do not affect the performance because feature-based cost volume provided flexibility.
         #print(cost3.shape)
-        pred3 = DisparityRegression(self.maxdisp)(cost3)
+        if self.isdisp:
+            pred3 = DisparityRegression(self.maxdisp)(cost3)
+        else:
+            pred3 = DepthRegression(self.maxdepth)(cost3)
 
         if self.training and self.loss == 'BCE':
             return pred1, pred2, pred3, cost1, cost2, cost3

@@ -13,7 +13,7 @@ from tqdm import tqdm
 from matplotlib import cm
 from datasets.messytable_test_local import get_test_loader
 import open3d as o3d
-from np_utils import *
+from utils.np_utils import *
 # from nets.psmnet import PSMNet
 from nets.psmnet import PSMNet
 from nets.transformer import Transformer
@@ -83,6 +83,9 @@ parser.add_argument(
 parser.add_argument(
     "--local_rank", type=int, default=0, help="Rank of device in distributed training"
 )
+parser.add_argument(
+    "--cv", action="store_true", default=False
+)
 
 args = parser.parse_args()
 cfg.merge_from_file(args.config_file)
@@ -94,11 +97,10 @@ if args.gan_model == "":
 # Calculate error for real and 3D printed objects
 real_obj_id = [4, 5, 7, 9, 13, 14, 15, 16]
 
-space = 1
-index_p = np.array([list(x) for x in np.ndindex(192,544,960)])*space
-cost_vol_p = o3d.utility.Vector3dVector(index_p)
-cost_vol_pcd = o3d.geometry.PointCloud(cost_vol_p)
-#index_p = 
+if args.cv:
+    space = 1
+    index_p = np.array([list(x) for x in np.ndindex(192,544,960)])*space
+    #index_p = 
 
 # python test_psmnet_with_confidence.py --model /code/models/model_4.pth --onreal --exclude-bg --exclude-zeros
 # python test_psmnet_with_confidence.py --config-file configs/remote_test.yaml --model ../train_8_14_cascade/train1/models/model_best.pth --onreal --exclude-bg --exclude-zeros --debug --gan-model
@@ -271,17 +273,96 @@ def test(psmnet_model, val_loader, logger, log_dir):
         for k in total_err_metrics.keys():
             if k != 'normal_err':
                 total_err_metrics[k] += err_metrics[k]
-        
-        b,d,w,h = cost_vol.shape
-        
-        
+        if args.cv:
+            disp_low = torch.floor(img_disp_l)
+            cv_low = F.one_hot(disp_low.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
+            disp_up = torch.ceil(img_disp_l)
+            cv_up = F.one_hot(disp_up.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
+            x = -(img_disp_l - disp_up)
+            
+            b,c,d,h,w = cv_low.shape
+            cv_low = cv_low.permute(1,2,0,3,4)
+            cv_up = cv_up.permute(1,2,0,3,4)
+            x = x.squeeze(1)
+            low = cv_low*x
+            
+            up = cv_up*(1-x)
+            low = low.permute(2,0,1,3,4)
+            up = up.permute(2,0,1,3,4)
+            
+            gt_cv = low+up
+            gt_cv = gt_cv.squeeze(0).cpu()
+            #print(gt_cv.shape, cost_vol.shape)
+            #print()
 
-        cost_c = cost_vol.cpu().numpy().reshape(d*w*h,1)
-        cost_color = cm.jet(cost_c)[..., :3].squeeze(axis=1)
-        cost_vol_pcd.colors = o3d.utility.Vector3dVector(cost_color)
-        o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '.ply'), cost_vol_pcd)
-        #print(cost_vol.shape, index_p.shape, cost_c.shape, cost_color.shape)
-        #assert 1==0
+            
+            b,d,w,h = cost_vol.shape
+            #print(b,d,w,h)
+            frustum_point = np.zeros([d*(w-top_pad)*h,3])
+            #gt_frustum_point = np.zeros([d*(w-top_pad)*h,3])
+            for disp in range(1, d):
+                c_layer = (np.ones([w,h])*disp).astype(float)
+                c_layer = c_layer[top_pad:, :]
+                #print(c_layer.shape, img_focal_length.cpu().numpy()[0,0,0,0], img_baseline.cpu().numpy()[0,0,0,0])
+                c_depth = img_focal_length.cpu().numpy()[0,0,0,0] * img_baseline.cpu().numpy()[0,0,0,0] / c_layer
+                c_pts = depth2pts_np(c_depth, cam_intrinsic, np.eye(4))
+                c_pts = np.reshape(c_pts, [c_pts.shape[0], c_pts.shape[1]])
+                
+                #print(c_pts.shape)
+                frustum_point[disp*c_pts.shape[0]:(disp+1)*c_pts.shape[0],:] = c_pts
+            
+            
+            frustum_point = frustum_point.reshape([-1,3])[c_pts.shape[0]:,:]
+            #print(frustum_point.shape)
+            #print(cost_vol.shape)
+            cost_c = cost_vol.cpu().numpy().reshape([d*w*h,1])
+            cost_c_save = cost_vol.cpu().numpy()[0,:,top_pad:,:]
+            #print(cost_c_save.shape, type(prefix))
+            cv_fname = os.path.join(log_dir, 'cost_vol_pcd', prefix + '-data.npy')
+            np.save(cv_fname, cost_c_save)
+            #print(np.max(cost_c), np.min(cost_c))
+            nonzeromask = (cost_c[:,0] > 1e-4)
+            
+            frustum_c = cost_vol.cpu().numpy()[:,:,top_pad:,:].reshape([d*(w-top_pad)*h,1])[c_pts.shape[0]:,:]
+            gt_frustum_c = gt_cv.numpy().reshape([d*(w-top_pad)*h,1])[c_pts.shape[0]:,:]
+            nonzeromask_frustum = (frustum_c[:,0] > 1e-4)
+            gt_nonzeromask_frustum = (gt_frustum_c[:,0] > 1e-4)
+
+            #print(frustum_c.shape, frustum_point.shape)
+            cost_c = cost_c[nonzeromask,:]
+            frustum_c = frustum_c[nonzeromask_frustum,:]
+            gt_frustum_c = gt_frustum_c[gt_nonzeromask_frustum,:]
+            #print(np.max(cost_c), np.min(cost_c))
+            #print(frustum_point.shape,nonzeromask_frustum.shape)
+            #print(np.sum(frustum_point!=0), frustum_point.shape)
+            frustum_point_p = frustum_point[nonzeromask_frustum, :]
+            gt_frustum_point = frustum_point[gt_nonzeromask_frustum, :]
+            #print(np.sum(frustum_point!=0))
+            #print(frustum_point.shape)
+            cost_point = index_p[nonzeromask,:]
+            cost_color = cm.jet(cost_c)[..., :3].squeeze(axis=1)
+            frustum_color = cm.jet(frustum_c)[..., :3].squeeze(axis=1)
+            gt_frustum_color = cm.jet(gt_frustum_c)[..., :3].squeeze(axis=1)
+
+            cost_vol_pcd = o3d.geometry.PointCloud()
+            frustum_pcd = o3d.geometry.PointCloud()
+            gt_frustum_pcd = o3d.geometry.PointCloud()
+
+            cost_vol_pcd.points = o3d.utility.Vector3dVector(cost_point)
+            cost_vol_pcd.colors = o3d.utility.Vector3dVector(cost_color)
+
+            #frustum_point = frustum_point.astype(int)
+            #print(cost_point.dtype, frustum_point.dtype, frustum_color.shape)
+            
+            frustum_pcd.points = o3d.utility.Vector3dVector(frustum_point_p)
+            frustum_pcd.colors = o3d.utility.Vector3dVector(frustum_color)
+
+            gt_frustum_pcd.points = o3d.utility.Vector3dVector(gt_frustum_point)
+            gt_frustum_pcd.colors = o3d.utility.Vector3dVector(gt_frustum_color)
+            
+            o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '.ply'), cost_vol_pcd)
+            o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '_frustum.ply'), frustum_pcd)
+            o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '_gt_frustum.ply'), gt_frustum_pcd)
 
         # Get disparity image
         pred_disp_np = pred_disp.squeeze(0).squeeze(0).detach().cpu().numpy()  # [H, W]

@@ -13,7 +13,7 @@ from utils.reduce import make_nograd_func
 # Error metric for messy-table-dataset
 # TODO: Ignore instances with small mask? (@compute_metric_for_each_image)
 @make_nograd_func
-def compute_err_metric(disp_gt, depth_gt, disp_pred, focal_length, baseline, mask, depth_pred=None):
+def compute_err_metric(disp_gt, depth_gt, disp_pred, focal_length, baseline, mask, depth_pred=None, isdisp=True):
     """
     Compute the error metrics for predicted disparity map
     :param disp_gt: GT disparity map, [bs, 1, H, W]
@@ -24,14 +24,20 @@ def compute_err_metric(disp_gt, depth_gt, disp_pred, focal_length, baseline, mas
     :param mask: Selected pixel
     :return: Error metrics
     """
-    epe = F.l1_loss(disp_pred[mask], disp_gt[mask], reduction='mean').item()
-    disp_diff = torch.abs(disp_gt[mask] - disp_pred[mask])  # [bs, 1, H, W]
-    bad1 = disp_diff[disp_diff > 1].numel() / disp_diff.numel()
-    bad2 = disp_diff[disp_diff > 2].numel() / disp_diff.numel()
+    #print(depth_gt.shape, depth_pred.shape)
+    if isdisp:
+        epe = F.l1_loss(disp_pred[mask], disp_gt[mask], reduction='mean').item()
+        disp_diff = torch.abs(disp_gt[mask] - disp_pred[mask])  # [bs, 1, H, W]
+        bad1 = disp_diff[disp_diff > 1].numel() / disp_diff.numel()
+        bad2 = disp_diff[disp_diff > 2].numel() / disp_diff.numel()
 
     # get predicted depth map
-    if depth_pred is None:
-        depth_pred = focal_length * baseline / disp_pred  # in meters
+        if depth_pred is None:
+            depth_pred = focal_length * baseline / disp_pred  # in meters
+    else:
+        depth_pred = disp_pred
+    
+    
 
     depth_abs_err = torch.clip(torch.abs(depth_gt[mask] * 1000 - depth_pred[mask] * 1000), min=0, max=100)
     depth_abs_err = torch.mean(depth_abs_err).item()
@@ -43,13 +49,15 @@ def compute_err_metric(disp_gt, depth_gt, disp_pred, focal_length, baseline, mas
     depth_err8 = depth_diff[depth_diff > 8e-3].numel() / depth_diff.numel()
 
     err = {}
-    err['epe'] = epe
-    err['bad1'] = bad1
-    err['bad2'] = bad2
-    err['depth_abs_err'] = depth_abs_err
-    err['depth_err2'] = depth_err2
-    err['depth_err4'] = depth_err4
-    err['depth_err8'] = depth_err8
+    if isdisp:
+        err['epe'] = epe
+        err['bad1'] = bad1
+        err['bad2'] = bad2
+    else:
+        err['depth_abs_err'] = depth_abs_err
+        err['depth_err2'] = depth_err2
+        err['depth_err4'] = depth_err4
+        err['depth_err8'] = depth_err8
     return err
 
 

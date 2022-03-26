@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from torch.autograd import Variable
 
 
 def convbn(in_planes, out_planes, kernel_size, stride, pad, dilation):
@@ -82,6 +83,15 @@ class DisparityRegression(nn.Module):
     def __init__(self, maxdisp):
         super(DisparityRegression, self).__init__()
         self.disp = torch.Tensor(np.reshape(np.array(range(maxdisp)),[1, maxdisp, 1, 1])).cuda()
+
+    def forward(self, x):
+        out = torch.sum(x * self.disp, 1, keepdim=True)
+        return out
+
+class DepthRegression(nn.Module):
+    def __init__(self, maxdepth):
+        super(DepthRegression, self).__init__()
+        self.disp = torch.arange(0.01, 0.01+maxdepth, 0.01, device='cuda', requires_grad=False).float()[None, :, None, None]
 
     def forward(self, x):
         out = torch.sum(x * self.disp, 1, keepdim=True)

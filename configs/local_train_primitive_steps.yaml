@@ -43,6 +43,7 @@ SOLVER:
 # Model parameters
 ARGS:
   MAX_DISP: 192             # maximum disparity
+  MAX_DEPTH: 1.6
   MODEL: 'gwcnet-c'
   GRAD_METHOD: 'detach'
   NDISP: (48, 24)           # ndisps

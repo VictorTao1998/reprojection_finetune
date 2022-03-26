@@ -257,7 +257,7 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
             pred_disp, cost_vol = psmnet_model(
                 img_L, img_R, img_L_transformed, img_R_transformed
             )
-            print("max: ", torch.max(pred_disp))
+            #print("max: ", torch.max(pred_disp))
         pred_disp = pred_disp[
             :, :, top_pad:, :
         ]  # TODO: if right_pad > 0 it needs to be (:-right_pad)
@@ -272,10 +272,34 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
         for k in total_err_metrics.keys():
             if k != 'normal_err':
                 total_err_metrics[k] += err_metrics[k]
+
+
+        disp_low = torch.floor(img_disp_l)
+        cv_low = F.one_hot(disp_low.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
+        disp_up = torch.ceil(img_disp_l)
+        cv_up = F.one_hot(disp_up.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
+        x = -(img_disp_l - disp_up)
+        
+        b,c,d,h,w = cv_low.shape
+        cv_low = cv_low.permute(1,2,0,3,4)
+        cv_up = cv_up.permute(1,2,0,3,4)
+        x = x.squeeze(1)
+        low = cv_low*x
+        
+        up = cv_up*(1-x)
+        low = low.permute(2,0,1,3,4)
+        up = up.permute(2,0,1,3,4)
+        
+        gt_cv = low+up
+        gt_cv = gt_cv.squeeze(0).cpu()
+        print(gt_cv.shape, cost_vol.shape)
+        #print()
+
         
         b,d,w,h = cost_vol.shape
-
-        frustum_point = np.zeros([d*w*h,3])
+        #print(b,d,w,h)
+        frustum_point = np.zeros([d*(w-top_pad)*h,3])
+        #gt_frustum_point = np.zeros([d*(w-top_pad)*h,3])
         for disp in range(1, d):
             c_layer = (np.ones([w,h])*disp).astype(float)
             c_layer = c_layer[top_pad:, :]
@@ -290,28 +314,39 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
         
         frustum_point = frustum_point.reshape([-1,3])[c_pts.shape[0]:,:]
         #print(frustum_point.shape)
-        
-        cost_c = cost_vol.cpu().numpy().reshape(d*w*h,1)
+        #print(cost_vol.shape)
+        cost_c = cost_vol.cpu().numpy().reshape([d*w*h,1])
+        cost_c_save = cost_vol.cpu().numpy()[0,:,top_pad:,:]
+        #print(cost_c_save.shape, type(prefix))
+        cv_fname = os.path.join(log_dir, 'cost_vol_pcd', prefix + '-data.npy')
+        np.save(cv_fname, cost_c_save)
         #print(np.max(cost_c), np.min(cost_c))
         nonzeromask = (cost_c[:,0] > 1e-4)
         
-        frustum_c = cost_c[c_pts.shape[0]:,:]
+        frustum_c = cost_vol.cpu().numpy()[:,:,top_pad:,:].reshape([d*(w-top_pad)*h,1])[c_pts.shape[0]:,:]
+        gt_frustum_c = gt_cv.numpy().reshape([d*(w-top_pad)*h,1])[c_pts.shape[0]:,:]
         nonzeromask_frustum = (frustum_c[:,0] > 1e-4)
+        gt_nonzeromask_frustum = (gt_frustum_c[:,0] > 1e-4)
+
         #print(frustum_c.shape, frustum_point.shape)
         cost_c = cost_c[nonzeromask,:]
         frustum_c = frustum_c[nonzeromask_frustum,:]
+        gt_frustum_c = gt_frustum_c[gt_nonzeromask_frustum,:]
         #print(np.max(cost_c), np.min(cost_c))
         #print(frustum_point.shape,nonzeromask_frustum.shape)
         #print(np.sum(frustum_point!=0), frustum_point.shape)
-        frustum_point = frustum_point[nonzeromask_frustum, :]
+        frustum_point_p = frustum_point[nonzeromask_frustum, :]
+        gt_frustum_point = frustum_point[gt_nonzeromask_frustum, :]
         #print(np.sum(frustum_point!=0))
         #print(frustum_point.shape)
         cost_point = index_p[nonzeromask,:]
         cost_color = cm.jet(cost_c)[..., :3].squeeze(axis=1)
         frustum_color = cm.jet(frustum_c)[..., :3].squeeze(axis=1)
+        gt_frustum_color = cm.jet(gt_frustum_c)[..., :3].squeeze(axis=1)
 
         cost_vol_pcd = o3d.geometry.PointCloud()
         frustum_pcd = o3d.geometry.PointCloud()
+        gt_frustum_pcd = o3d.geometry.PointCloud()
 
         cost_vol_pcd.points = o3d.utility.Vector3dVector(cost_point)
         cost_vol_pcd.colors = o3d.utility.Vector3dVector(cost_color)
@@ -319,11 +354,15 @@ def test(transformer_model, psmnet_model, val_loader, logger, log_dir):
         #frustum_point = frustum_point.astype(int)
         #print(cost_point.dtype, frustum_point.dtype, frustum_color.shape)
         
-        frustum_pcd.points = o3d.utility.Vector3dVector(frustum_point)
+        frustum_pcd.points = o3d.utility.Vector3dVector(frustum_point_p)
         frustum_pcd.colors = o3d.utility.Vector3dVector(frustum_color)
+
+        gt_frustum_pcd.points = o3d.utility.Vector3dVector(gt_frustum_point)
+        gt_frustum_pcd.colors = o3d.utility.Vector3dVector(gt_frustum_color)
         
         o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '.ply'), cost_vol_pcd)
-        o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + 'frustum.ply'), frustum_pcd)
+        o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '_frustum.ply'), frustum_pcd)
+        o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '_gt_frustum.ply'), gt_frustum_pcd)
 
 
         # Get disparity image
