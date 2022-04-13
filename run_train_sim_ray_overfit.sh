@@ -7,4 +7,5 @@ python -m torch.distributed.launch /code/ActiveZero/train_psmnet_sim_ray_overfit
 --gaussian-blur \
 --color-jitter \
 --summary-freq 50 \
---debug
+--debug \
+--n_rays 1024
