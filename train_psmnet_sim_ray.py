@@ -13,7 +13,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 
 from datasets.messytable_on_real import MessytableOnRealDataset as MessytableDataset
-from nets.psmnet import PSMNet
+from nets.psmnet_ray import PSMNet, Renderer
 from nets.transformer import Transformer
 from nets.discriminator import Discriminator
 from utils.cascade_metrics import compute_err_metric
@@ -24,6 +24,8 @@ from utils.reduce import set_random_seed, synchronize, AverageMeterDict, \
     tensor2float, tensor2numpy, reduce_scalar_outputs, make_nograd_func
 from utils.util import setup_logger, weights_init, \
     adjust_learning_rate, save_scalars, save_scalars_graph, save_images, save_images_grid, disp_error_img, depth_error_img
+
+from nets.psmnet_submodule_ray import *
 
 cudnn.benchmark = True
 
@@ -38,12 +40,13 @@ parser.add_argument("--local_rank", type=int, default=0, help='Rank of device in
 parser.add_argument('--debug', action='store_true', help='Whether run in debug mode (will load less data)')
 parser.add_argument('--sub', type=int, default=100, help='If debug mode is enabled, sub will be the number of data loaded')
 parser.add_argument('--warp-op', action='store_true',default=True, help='whether use warp_op function to get disparity')
-parser.add_argument('--loss-ratio-sim', type=float, default=1, help='Ratio between loss_psmnet_sim and loss_reprojection_sim')
-parser.add_argument('--loss-ratio-real', type=float, default=1, help='Ratio for loss_reprojection_real')
+parser.add_argument('--loss-ratio-sim', type=float, default=1., help='Ratio between loss_psmnet_sim and loss_reprojection_sim')
+parser.add_argument('--loss-ratio-real', type=float, default=1., help='Ratio for loss_reprojection_real')
 parser.add_argument('--gaussian-blur', action='store_true',default=False, help='whether apply gaussian blur')
 parser.add_argument('--color-jitter', action='store_true',default=False, help='whether apply color jitter')
 parser.add_argument('--ps', type=int, default=11, help='Patch size of doing patch loss calculation')
-parser.add_argument('--usedepth', action='store_true', default=False)
+parser.add_argument('--n_rays', type=int, default=2048)
+
 
 args = parser.parse_args()
 cfg.merge_from_file(args.config_file)
@@ -75,7 +78,7 @@ logger.info(f'Running with {num_gpus} GPUs')
 # python -m torch.distributed.launch train_psmnet_temporal_ir_reproj.py --config-file configs/remote_train_primitive_randscenes.yaml --summary-freq 10 --save-freq 100 --logdir ../train_10_21_psmnet_smooth_ir_reproj/debug --debug
 
 
-def train(psmnet_model, psmnet_optimizer, TrainImgLoader, ValImgLoader):
+def train(psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg_model, TrainImgLoader, ValImgLoader):
     for epoch_idx in range(cfg.SOLVER.EPOCHS):
         # One epoch training loop
         avg_train_scalars_psmnet = AverageMeterDict()
@@ -95,7 +98,7 @@ def train(psmnet_model, psmnet_optimizer, TrainImgLoader, ValImgLoader):
             do_summary = global_step % args.summary_freq == 0
             # Train one sample
             scalar_outputs_psmnet, img_outputs_psmnet = \
-                train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True)
+                train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg_model, isTrain=True)
             # Save result to tensorboard
             if (not is_distributed) or (dist.get_rank() == 0):
                 scalar_outputs_psmnet = tensor2float(scalar_outputs_psmnet)
@@ -116,7 +119,9 @@ def train(psmnet_model, psmnet_optimizer, TrainImgLoader, ValImgLoader):
                     checkpoint_data = {
                         'epoch': epoch_idx,
                         'PSMNet': psmnet_model.state_dict(),
-                        'optimizerPSMNet': psmnet_optimizer.state_dict()
+                        'optimizerPSMNet': psmnet_optimizer.state_dict(),
+                        'Render': render_model.state_dict(),
+                        'optimizerRender': render_optimizer.state_dict()
                     }
                     save_filename = os.path.join(args.logdir, 'models', f'model_{global_step}.pth')
                     torch.save(checkpoint_data, save_filename)
@@ -127,13 +132,15 @@ def train(psmnet_model, psmnet_optimizer, TrainImgLoader, ValImgLoader):
         gc.collect()
 
 
-def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
+def train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg_model, isTrain=True):
     if isTrain:
-        #transformer_model.train()
+        render_model.train()
         psmnet_model.train()
+        rayreg_model.train()
     else:
-        #transformer_model.eval()
+        render_model.eval()
         psmnet_model.eval()
+        rayreg_model.eval()
 
     # Load data
     img_L = sample['img_L'].to(cuda_device)  # [bs, 3, H, W]
@@ -165,16 +172,67 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
         del img_disp_r
 
     # Get stereo loss on sim
-    if not args.usedepth:
-        mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)
-    else:
-        #print(torch.max(depth_gt))
-        mask = (depth_gt < cfg.ARGS.MAX_DEPTH) * (depth_gt > 0)  # Note in training we do not exclude bg
+
+    mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)
+
     if isTrain:
-        calib = img_focal_length * img_baseline
+        #calib = img_focal_length * img_baseline
         #print(img_focal_length.shape, img_baseline.shape, calib.shape)
-        pred_disp1, pred_disp2, pred_disp3, cost_vol_1, cost_vol_2, cost_vol = psmnet_model(img_L, img_R, calib=calib)
-        sim_pred_disp = pred_disp3
+        cost_vol = psmnet_model(img_L, img_R)
+        B,C,D,H,W = cost_vol.shape
+        #print(cost_vol.shape)
+        xs = torch.randint(0,H,[args.n_rays])
+        ys = torch.randint(0,W,[args.n_rays])
+
+        mask_p = mask[:,:,xs,ys][...,None]
+        #print(mask_p.shape)
+        while torch.sum(mask_p) == 0:
+            xs = torch.randint(0,H,[args.n_rays])
+            ys = torch.randint(0,W,[args.n_rays])
+
+            mask_p = mask[:,:,xs,ys][...,None]
+        #print(mask_p.shape)
+        #print(cost_vol.shape, disp_gt_l.shape)
+        ray = cost_vol[:,:,:,xs,ys].view(B,C,D,args.n_rays)  # B, C, D, N_Rays
+
+        disp_candidate = torch.arange(0,cfg.ARGS.MAX_DISP).float().to(cuda_device).expand(args.n_rays,-1).permute(1,0)
+        #print(disp_candidate.shape, D)
+        disp_candidate = disp_candidate + torch.rand(disp_candidate.shape).to(cuda_device)
+        #print(torch.max(disp_candidate))
+        disp_candidate_g = ((disp_candidate/191.) * 2.)-1.
+        
+        D = 192
+
+        disp_cand_n = torch.arange(0, args.n_rays).float().to(cuda_device).expand(192,-1)
+        disp_cand_n = ((disp_cand_n/float(args.n_rays-1.)) * 2.)-1.
+        #print(torch.min(disp_cand_n), torch.max(disp_cand_n))
+        
+        
+        disp_cand_grid = torch.cat((disp_candidate_g[...,None], disp_cand_n[...,None]), -1).view(B,D,args.n_rays,2)
+        #print(ray.shape, disp_cand_grid.shape)
+        #print(torch.max(disp_cand_grid), torch.min(disp_cand_grid))
+
+        pts_feat = F.grid_sample(ray, disp_cand_grid, mode='bilinear', padding_mode='zeros', align_corners=True)
+        
+        disp_fea = disp_candidate_g[None,None,:,:]
+        pts_feat = torch.cat((pts_feat, disp_fea), 1).view(B,D*args.n_rays,C+1)
+
+        alpha = render_model(pts_feat)
+
+        output = alpha.view(B,D,args.n_rays,1)
+
+        gt_out = disp_gt_l[:,:,xs,ys][...,None]
+        #disp_gt_l_t = disp_gt_l.view(1,1,-1)
+        #print(gt_out.shape)
+        #for i in range(args.n_rays):
+        #    assert gt_out[0,0,i,0] == disp_gt_l[0,0,xs[i],ys[i]]
+
+        pred_disp = rayreg_model(output, disp_candidate[None,:,:,None])
+        #print(pts_feat.shape, alpha.shape, output.shape, gt_out.shape, disp_gt_l.shape, pred_disp.shape)
+
+        loss_psmnet = F.smooth_l1_loss(pred_disp[mask_p], gt_out[mask_p], reduction='mean')
+        #print(pred_disp[0,0,:,0], gt_out[0,0,:,0])
+        #assert 1==0
         #gt_disp = torch.clone(disp_gt_l).long()
         #msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
         #gt_disp[msk_gt_disp] = 0
@@ -182,14 +240,10 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
         #cost_vol = cost_vol.permute(0,2,3,1)
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
         #loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
-        if args.usedepth:
-            loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], depth_gt[mask], reduction='mean') \
-               + 0.7 * F.smooth_l1_loss(pred_disp2[mask], depth_gt[mask], reduction='mean') \
-               + F.smooth_l1_loss(pred_disp3[mask], depth_gt[mask], reduction='mean')
-        else:
-            loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
-                + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
-                + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
+
+        #loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
+        #    + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
+        #    + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
     else:
         with torch.no_grad():
             pred_disp = psmnet_model(img_L, img_R, img_L_transformed, img_R_transformed)
@@ -205,12 +259,15 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     #)
 
     # Backward on sim_ir_pattern reprojection
-    sim_loss = loss_psmnet * args.loss_ratio_sim
+    sim_loss = loss_psmnet
     if isTrain:
         #transformer_optimizer.zero_grad()
         psmnet_optimizer.zero_grad()
+        render_optimizer.zero_grad()
+        #print(sim_loss.item())
         sim_loss.backward()
         psmnet_optimizer.step()
+        render_optimizer.step()
         #transformer_optimizer.step()
 
     """
@@ -253,30 +310,28 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, isTrain=True):
     #}
 
     # Compute stereo error metrics on sim
-    pred_disp = sim_pred_disp
+    #pred_disp = sim_pred_disp
     scalar_outputs_psmnet = {'loss': loss_psmnet.item()
                              #'sim_reprojection_loss': sim_ir_reproj_loss.item()
                              #'real_reprojection_loss': real_ir_reproj_loss.item()
                             }
     #print(pred_disp.shape)
-    err_metrics = compute_err_metric(disp_gt_l,
-                                     depth_gt,
-                                     pred_disp,
-                                     img_focal_length,
-                                     img_baseline,
-                                     mask,
-                                     isdisp=not args.usedepth)
-    scalar_outputs_psmnet.update(err_metrics)
+    #err_metrics = compute_err_metric(disp_gt_l,
+    #                                 depth_gt,
+    #                                 pred_disp,
+    #                                 img_focal_length,
+    #                                 img_baseline,
+    #                                 mask,
+    #                                 isdisp=not args.usedepth)
+    #scalar_outputs_psmnet.update(err_metrics)
     # Compute error images
-    if args.usedepth:
-        pred_disp_err_np = depth_error_img(pred_disp[[0]]*1000, depth_gt[[0]]*1000, mask[[0]])
-    else:
-        pred_disp_err_np = disp_error_img(pred_disp[[0]], disp_gt_l[[0]], mask[[0]])
-    pred_disp_err_tensor = torch.from_numpy(np.ascontiguousarray(pred_disp_err_np[None].transpose([0, 3, 1, 2])))
+
+    #pred_disp_err_np = disp_error_img(pred_disp[[0]], disp_gt_l[[0]], mask[[0]])
+    #pred_disp_err_tensor = torch.from_numpy(np.ascontiguousarray(pred_disp_err_np[None].transpose([0, 3, 1, 2])))
     img_outputs_psmnet = {
-        'disp/depth_gt_l': depth_gt[[0]].repeat([1, 3, 1, 1]),
-        'disp/depth_pred': pred_disp[[0]].repeat([1, 3, 1, 1]),
-        'disp/depth_err': pred_disp_err_tensor,
+        #'disp/depth_gt_l': depth_gt[[0]].repeat([1, 3, 1, 1]),
+        #'disp/depth_pred': pred_disp[[0]].repeat([1, 3, 1, 1]),
+        #'disp/depth_err': pred_disp_err_tensor,
         'input_L': img_L,
         'input_R': img_R
     }
@@ -319,14 +374,29 @@ if __name__ == '__main__':
     #    transformer_model = torch.nn.DataParallel(transformer_model)
 
     # Create PSMNet model
-    isdisp = not args.usedepth
-    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, loss='BCE', isdisp=isdisp, max_depth=cfg.ARGS.MAX_DEPTH).to(cuda_device)
-    psmnet_optimizer = torch.optim.Adam(psmnet_model.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
+
+    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP).to(cuda_device)
+    psmnet_optimizer = torch.optim.Adam(psmnet_model.parameters(), lr=5e-4, betas=(0.9, 0.999))
     if is_distributed:
         psmnet_model = torch.nn.parallel.DistributedDataParallel(
             psmnet_model, device_ids=[args.local_rank], output_device=args.local_rank)
     else:
         psmnet_model = torch.nn.DataParallel(psmnet_model)
+
+    render_model = Renderer(D=8, W=256, input_ch=1, output_ch=1, input_ch_feat=8, skips=[4]).to(cuda_device)
+    render_optimizer = torch.optim.Adam(render_model.parameters(), lr=5e-4, betas=(0.9, 0.999))
+    if is_distributed:
+        render_model = torch.nn.parallel.DistributedDataParallel(
+            render_model, device_ids=[args.local_rank], output_device=args.local_rank)
+    else:
+        render_model = torch.nn.DataParallel(render_model)
+
+    rayreg_model = RayRegression().to(cuda_device)
+    if is_distributed:
+        rayreg_model = torch.nn.parallel.DistributedDataParallel(
+            rayreg_model, device_ids=[args.local_rank], output_device=args.local_rank)
+    else:
+        rayreg_model = torch.nn.DataParallel(rayreg_model)
 
     #psm_param = sum(p.numel() for p in psmnet_model.parameters() if p.requires_grad)
     #trans_param = sum(p.numel() for p in transformer_model.parameters() if p.requires_grad)
@@ -334,4 +404,4 @@ if __name__ == '__main__':
     
 
     # Start training
-    train(psmnet_model, psmnet_optimizer, TrainImgLoader, ValImgLoader)
+    train(psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg_model, TrainImgLoader, ValImgLoader)

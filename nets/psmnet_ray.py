@@ -5,7 +5,7 @@ Feature: Hourglass and PSMNet (stacked hourglass) module
 
 import math
 
-from .psmnet_submodule import *
+from .psmnet_submodule_ray import *
 from torch.autograd import Variable
 
 
@@ -61,18 +61,76 @@ class hourglass(nn.Module):
         out = self.conv6(post)
         return out, pre, post
 
+class ConvBnReLU3D(nn.Module):
+    def __init__(self, in_channels, out_channels,
+                 kernel_size=3, stride=1, pad=1,
+                 ):
+        super(ConvBnReLU3D, self).__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels,
+                              kernel_size, stride=stride, padding=pad, bias=False)
+        self.bn = nn.ReLU(inplace=True)
+        # self.bn = nn.ReLU()
+
+    def forward(self, x):
+        return self.bn(self.conv(x))
+
+class CostRegNet(nn.Module):
+    def __init__(self, in_channels):
+        super(CostRegNet, self).__init__()
+        self.conv0 = ConvBnReLU3D(in_channels, 8)
+
+        self.conv1 = ConvBnReLU3D(8, 16, stride=2)
+        self.conv2 = ConvBnReLU3D(16, 16)
+
+        self.conv3 = ConvBnReLU3D(16, 32, stride=2)
+        self.conv4 = ConvBnReLU3D(32, 32)
+
+        self.conv5 = ConvBnReLU3D(32, 64, stride=2)
+        self.conv6 = ConvBnReLU3D(64, 64)
+
+        self.conv7 = nn.Sequential(
+            nn.ConvTranspose3d(64, 32, 3, padding=1, output_padding=1,
+                               stride=2, bias=False),
+            nn.BatchNorm3d(32))
+
+        self.conv9 = nn.Sequential(
+            nn.ConvTranspose3d(32, 16, 3, padding=1, output_padding=1,
+                               stride=2, bias=False),
+            nn.BatchNorm3d(16))
+
+        self.conv11 = nn.Sequential(
+            nn.ConvTranspose3d(16, 8, 3, padding=1, output_padding=1,
+                               stride=2, bias=False),
+            nn.BatchNorm3d(8))
+
+        # self.conv12 = nn.Conv3d(8, 8, 3, stride=1, padding=1, bias=True)
+
+    def forward(self, x):
+        conv0 = self.conv0(x)
+        conv2 = self.conv2(self.conv1(conv0))
+        conv4 = self.conv4(self.conv3(conv2))
+
+        x = self.conv6(self.conv5(conv4))
+        x = conv4 + self.conv7(x)
+        del conv4
+        x = conv2 + self.conv9(x)
+        del conv2
+        x = conv0 + self.conv11(x)
+        del conv0
+        # x = self.conv12(x)
+        return x
+
 
 class PSMNet(nn.Module):
-    def __init__(self, maxdisp=192, loss='BCE', transform=False, isdisp=True, max_depth=1.6):
+    def __init__(self, maxdisp=192, transform=False):
         super(PSMNet, self).__init__()
         self.maxdisp = maxdisp
-        self.loss = loss
         self.transform = transform
         self.feature_extraction = FeatureExtraction(transform)
-        self.isdisp = isdisp
-        self.maxdepth = max_depth
+
         self.down = 2
-        self.n_depth = torch.arange(0.01, 0.01 + max_depth, 0.01).shape[0]
+        self.cost_reg = CostRegNet(64)
+
 
         self.dres0 = nn.Sequential(
             convbn_3d(64, 32, 3, 1, 1),
@@ -93,17 +151,17 @@ class PSMNet(nn.Module):
         self.classif1 = nn.Sequential(
             convbn_3d(32, 32, 3, 1, 1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(32, 1, kernel_size=3, padding=1, stride=1, bias=False)
+            nn.Conv3d(32, 32, kernel_size=3, padding=1, stride=1, bias=False)
         )
         self.classif2 = nn.Sequential(
             convbn_3d(32, 32, 3, 1, 1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(32, 1, kernel_size=3, padding=1, stride=1, bias=False)
+            nn.Conv3d(32, 32, kernel_size=3, padding=1, stride=1, bias=False)
         )
         self.classif3 = nn.Sequential(
             convbn_3d(32, 32, 3, 1, 1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(32, 1, kernel_size=3, padding=1, stride=1, bias=False)
+            nn.Conv3d(32, 32, kernel_size=3, padding=1, stride=1, bias=False)
         )
 
         # for m in self.modules():
@@ -126,43 +184,8 @@ class PSMNet(nn.Module):
             elif isinstance(m, nn.Linear):
                 m.bias.data.zero_()
 
-    def warp(self, x, calib):
-        """
-        warp an image/tensor (im2) back to im1, according to the optical flow
-        x: [B, C, D, H, W] (im2)
-        flo: [B, 2, H, W] flow
-        """
-        # B,C,D,H,W to B,H,W,C,D
-        x = x.transpose(1, 3).transpose(2, 4)
-        B, H, W, C, D = x.size()
-        x = x.view(B, -1, C, D)
-        # mesh grid
-        xx = (calib / (self.down * 4.))[:, None] / torch.arange(0.01, 0.01 + self.maxdepth / self.down, 0.01,
-                                                                device='cuda').float()[None, :]
-        #new_D = self.maxdepth // self.down
-        #print(xx.shape)
-        new_D = xx.shape[-1]
 
-        xx = xx.view(B, 1, new_D).repeat(1, C, 1)
-        xx = xx.view(B, C, new_D, 1)
-        yy = torch.arange(0, C, device='cuda').view(-1, 1).repeat(1, new_D).float()
-        yy = yy.view(1, C, new_D, 1).repeat(B, 1, 1, 1)
-        grid = torch.cat((xx, yy), -1).float()
-
-        vgrid = Variable(grid)
-
-        # scale grid to [-1,1]
-        vgrid[:, :, :, 0] = 2.0 * vgrid[:, :, :, 0] / max(D - 1, 1) - 1.0
-        vgrid[:, :, :, 1] = 2.0 * vgrid[:, :, :, 1] / max(C - 1, 1) - 1.0
-
-        if float(torch.__version__[:3])>1.2:
-            output = nn.functional.grid_sample(x, vgrid, align_corners=True).contiguous()
-        else:
-            output = nn.functional.grid_sample(x, vgrid).contiguous()
-        output = output.view(B, H, W, C, new_D).transpose(1, 3).transpose(2, 4)
-        return output.contiguous()
-
-    def forward(self, img_L, img_R, calib=None, img_L_transformed=None, img_R_transformed=None):
+    def forward(self, img_L, img_R, img_L_transformed=None, img_R_transformed=None):
 
         if self.transform:
             refimg_feature = self.feature_extraction(img_L, img_L_transformed)  # [bs, 32, H/4, W/4]
@@ -183,11 +206,10 @@ class PSMNet(nn.Module):
                 cost[:, :feature_size, i, :, :] = refimg_feature
                 cost[:, feature_size:, i, :, :] = targetimg_feature
         cost = cost.contiguous()  # [bs, fs*2, max_disp/4, H/4, W/4]
-
-        if self.isdisp == False:
-            cost = self.warp(cost, calib)
+        #print(cost.shape)
 
         #print(cost.shape)
+        """
         cost0 = self.dres0(cost)
         cost0 = self.dres1(cost0) + cost0
 
@@ -204,53 +226,69 @@ class PSMNet(nn.Module):
         cost1 = self.classif1(out1)
         cost2 = self.classif2(out2) + cost1
         cost3 = self.classif3(out3) + cost2
+        """
+        cost = F.interpolate(cost, (self.maxdisp//4, 4 * H, 4 * W), mode='trilinear', align_corners=False)
+        
+        cost = self.cost_reg(cost)
 
         if self.training:
-            # cost1 = F.upsample(cost1, [self.maxdisp,img_L.size()[2],img_L.size()[3]], mode='trilinear')
-            # cost2 = F.upsample(cost2, [self.maxdisp,img_L.size()[2],img_L.size()[3]], mode='trilinear')
-            if self.isdisp:
-                cost1 = F.interpolate(cost1, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
-                cost2 = F.interpolate(cost2, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
-            else:
-                cost1 = F.interpolate(cost1, (self.n_depth, 4 * H, 4 * W), mode='trilinear', align_corners=False)
-                cost2 = F.interpolate(cost2, (self.n_depth, 4 * H, 4 * W), mode='trilinear', align_corners=False)
-            cost1 = torch.squeeze(cost1, 1)
-            cost1 = F.softmax(cost1, dim=1)
-            if self.isdisp:
-                pred1 = DisparityRegression(self.maxdisp)(cost1)
-            else:
-                pred1 = DepthRegression(self.maxdepth)(cost1)
-
-            cost2 = torch.squeeze(cost2, 1)
-            cost2 = F.softmax(cost2, dim=1)
-            if self.isdisp:
-                pred2 = DisparityRegression(self.maxdisp)(cost2)
-            else:
-                pred2 = DepthRegression(self.maxdepth)(cost2)
-
-        # cost3 = F.upsample(cost3, [self.maxdisp,img_L.size()[2],img_L.size()[3]], mode='trilinear')
-        if self.isdisp:
-            cost3 = F.interpolate(cost3, (self.maxdisp, 4 * H, 4 * W), mode='trilinear', align_corners=False)
+            return cost
         else:
-            cost3 = F.interpolate(cost3, (self.n_depth, 4 * H, 4 * W), mode='trilinear', align_corners=False)
-        cost3 = torch.squeeze(cost3, 1)
-        cost3 = F.softmax(cost3, dim=1)
+            return cost
 
-        # For your information: This formulation 'softmax(c)' learned "similarity"
-        # while 'softmax(-c)' learned 'matching cost' as mentioned in the paper.
-        # However, 'c' or '-c' do not affect the performance because feature-based cost volume provided flexibility.
-        #print(cost3.shape)
-        if self.isdisp:
-            pred3 = DisparityRegression(self.maxdisp)(cost3)
-        else:
-            pred3 = DepthRegression(self.maxdepth)(cost3)
+class Renderer(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, output_ch=1, input_ch_feat=8, skips=[4]):
+        """
+        """
+        super(Renderer, self).__init__()
+        self.D = D
+        self.W = W
+        self.input_ch = input_ch
+        #self.input_ch_views = input_ch_views
+        self.skips = skips
+        #self.use_viewdirs = use_viewdirs
+        self.in_ch_pts, self.in_ch_feat = input_ch, input_ch_feat
 
-        if self.training and self.loss == 'BCE':
-            return pred1, pred2, pred3, cost1, cost2, cost3
-        elif self.training:
-            return pred1, pred2, pred3
-        else:
-            return pred3, cost3
+        self.pts_linears = nn.ModuleList(
+            [nn.Linear(self.in_ch_pts, W, bias=True)] + [nn.Linear(W, W, bias=True) if i not in self.skips else nn.Linear(W + self.in_ch_pts, W) for i in range(D-1)])
+        self.pts_bias = nn.Linear(input_ch_feat, W)
+        #self.views_linears = nn.ModuleList([nn.Linear(input_ch_views + W, W//2)])
+
+
+        #self.feature_linear = nn.Linear(W, W)
+        self.alpha_linear = nn.Linear(W, 1)
+
+        #self.output_linear = nn.Linear(W, output_ch)
+
+        self.pts_linears.apply(weights_init)
+        #self.views_linears.apply(weights_init)
+        #self.feature_linear.apply(weights_init)
+        self.alpha_linear.apply(weights_init)
+
+        #self.rgb_linear.apply(weights_init)
+
+    def forward(self, x):
+
+        dim = x.shape[-1]
+        #in_ch_feat = dim-self.in_ch_pts
+        input_pts, input_feats = torch.split(x, [self.in_ch_pts, self.in_ch_feat], dim=-1)
+
+        h = input_pts
+        bias = self.pts_bias(input_feats)
+        for i, l in enumerate(self.pts_linears):
+            h = self.pts_linears[i](h) * bias
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
+
+        alpha = torch.relu(self.alpha_linear(h))
+        return alpha
+
+def weights_init(m):
+    if isinstance(m, nn.Linear):
+        nn.init.kaiming_normal_(m.weight.data)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias.data)
 
 
 if __name__ == '__main__':

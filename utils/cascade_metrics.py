@@ -53,11 +53,10 @@ def compute_err_metric(disp_gt, depth_gt, disp_pred, focal_length, baseline, mas
         err['epe'] = epe
         err['bad1'] = bad1
         err['bad2'] = bad2
-    else:
-        err['depth_abs_err'] = depth_abs_err
-        err['depth_err2'] = depth_err2
-        err['depth_err4'] = depth_err4
-        err['depth_err8'] = depth_err8
+    err['depth_abs_err'] = depth_abs_err
+    err['depth_err2'] = depth_err2
+    err['depth_err4'] = depth_err4
+    err['depth_err8'] = depth_err8
     return err
 
 

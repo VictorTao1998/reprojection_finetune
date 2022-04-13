@@ -58,6 +58,7 @@ def save_img(
     mask,
     cam_intrinsic,
     cam_extrinsic=np.eye(4),
+    isdisp=True
 ):
     disp_path = os.path.join("pred_disp", prefix) + ".png"
     disp_gt_path = os.path.join("gt_disp", prefix) + ".png"
@@ -72,19 +73,22 @@ def save_img(
     realsense_pcd_err_path = os.path.join("realsense_pcd", f'{prefix}_err') + ".ply"
     gt_pcd_path = os.path.join("gt_pcd", prefix) + ".ply"
 
-    # Save predicted images
-    masked_pred_disp_np = np.ma.masked_where(
-        pred_disp_np == -1, pred_disp_np
-    )  # mark background as red
+
     custom_cmap = plt.get_cmap("viridis").copy()
     custom_cmap.set_bad(color="red")
-    plt.imsave(
-        os.path.join(log_dir, disp_path),
-        masked_pred_disp_np,
-        cmap=custom_cmap,
-        vmin=0,
-        vmax=cfg.ARGS.MAX_DISP,
-    )
+    if isdisp:
+        # Save predicted images
+        masked_pred_disp_np = np.ma.masked_where(
+            pred_disp_np == -1, pred_disp_np
+        )  # mark background as red
+        
+        plt.imsave(
+            os.path.join(log_dir, disp_path),
+            masked_pred_disp_np,
+            cmap=custom_cmap,
+            vmin=0,
+            vmax=cfg.ARGS.MAX_DISP,
+        )
 
     #plt.imsave(
     #    os.path.join(log_dir, pred_conf_path),
@@ -211,7 +215,8 @@ def save_img(
     )
 
     # Save error images
-    plt.imsave(os.path.join(log_dir, disp_abs_err_cm_path), pred_disp_err_np)
+    if isdisp:
+        plt.imsave(os.path.join(log_dir, disp_abs_err_cm_path), pred_disp_err_np)
     plt.imsave(os.path.join(log_dir, depth_abs_err_cm_path), pred_depth_err_np)
     plt.close("all")
     return angle_out

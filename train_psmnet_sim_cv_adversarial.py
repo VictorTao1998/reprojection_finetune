@@ -24,7 +24,7 @@ from utils.config import cfg
 from utils.reduce import set_random_seed, synchronize, AverageMeterDict, \
     tensor2float, tensor2numpy, reduce_scalar_outputs, make_nograd_func
 from utils.util import setup_logger, weights_init, set_requires_grad, \
-    adjust_learning_rate, save_scalars, save_scalars_graph, save_images, save_images_grid, disp_error_img
+    adjust_learning_rate, save_scalars, save_scalars_graph, save_images, save_images_grid, disp_error_img, depth_error_img
 
 cudnn.benchmark = True
 
@@ -53,6 +53,7 @@ parser.add_argument('--clipc', type=float, default = 0.01)
 parser.add_argument('--lam', type=float, default = 10)
 parser.add_argument('--diffcv', action='store_true', default=False)
 parser.add_argument('--kernel', type=int, default=3)
+parser.add_argument('--usedepth', action='store_true', default=False)
 
 args = parser.parse_args()
 cfg.merge_from_file(args.config_file)
@@ -204,35 +205,77 @@ def train_sample(sample, psmnet_model, discriminator,
         del img_disp_r
 
     # Get stereo loss on sim
-    mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)  # Note in training we do not exclude bg
+    if not args.usedepth:
+        mask = (disp_gt_l < cfg.ARGS.MAX_DISP) * (disp_gt_l > 0)
+    else:
+        #print(torch.max(depth_gt))
+        mask = (depth_gt < cfg.ARGS.MAX_DEPTH) * (depth_gt > 0)  # Note in training we do not exclude bg
+
     if isTrain:
+        calib = img_focal_length * img_baseline
         pred_disp1, pred_disp2, pred_disp3, cost_vol_1, cost_vol_2, cost_vol = \
-                psmnet_model(img_L, img_R)
+                psmnet_model(img_L, img_R, calib=calib)
         
         #dis_output = discriminator(cost_vol)
         sim_pred_disp = pred_disp3
         gt_disp = torch.clone(disp_gt_l).long()
         msk_gt_disp = (gt_disp < cfg.ARGS.MAX_DISP) * (gt_disp > 0)
+        #print(depth_gt.dtype)
         #gt_disp[msk_gt_disp] = 0
         if args.diffcv:
-            disp_low = torch.floor(disp_gt_l)
-            cv_low = F.one_hot(disp_low.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
-            disp_up = torch.ceil(disp_gt_l)
-            cv_up = F.one_hot(disp_up.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
-            x = -(disp_gt_l - disp_up)
-            
-            b,c,d,h,w = cv_low.shape
-            cv_low = cv_low.permute(1,2,0,3,4)
-            cv_up = cv_up.permute(1,2,0,3,4)
-            x = x.squeeze(1)
-            low = cv_low*x
-            
-            up = cv_up*(1-x)
-            low = low.permute(2,0,1,3,4)
-            up = up.permute(2,0,1,3,4)
-            
-            gt_cv = low+up
-            gt_cv = gt_cv.cuda()
+            if args.usedepth:
+                depth_value = torch.arange(cfg.ARGS.OFFSET, cfg.ARGS.OFFSET+cfg.ARGS.MAX_DEPTH, cfg.ARGS.OFFSET).float().cuda()
+                n_depth = depth_value.shape[0]
+                #print(depth_value)
+                #depth = torch.tensor([[0.013,0.035],[0.064,0.185]]).unsqueeze(0)
+ 
+                depth_low_ind = (torch.div(depth_gt, cfg.ARGS.OFFSET, rounding_mode='floor') - 1).type(torch.long)
+                mask_far = depth_low_ind > n_depth - 1
+                depth_high_ind = depth_low_ind + 1
+
+                depth_low_ind[mask_far] = n_depth - 1
+                depth_high_ind[mask_far] = n_depth - 1
+                #print(n_depth, torch.max(depth_low_ind))
+                mask_pe = F.one_hot(depth_low_ind, num_classes=n_depth).permute(0,4,1,2,3).squeeze(2).type(torch.bool)
+                mask_ne = F.one_hot(depth_high_ind, num_classes=n_depth).permute(0,4,1,2,3).squeeze(2).type(torch.bool)
+                mask_e = torch.logical_and(mask_pe, mask_ne)
+                #print(mask_pe.shape)
+  
+
+
+                depth_low = depth_gt - torch.remainder(depth_gt, cfg.ARGS.OFFSET)
+
+                x_low = (cfg.ARGS.OFFSET + depth_low -depth_gt)/cfg.ARGS.OFFSET
+                x_high = 1 - x_low
+                
+                gt_cv = torch.zeros_like(mask_pe).float().cuda()
+                #print(x_low.shape, mask_pe.shape, gt_cv.shape, torch.sum(mask_pe))
+                gt_cv[mask_pe] = x_low.flatten()
+                gt_cv[mask_ne] = x_high.flatten()
+                gt_cv[mask_e] = 1.
+                gt_cv = gt_cv.unsqueeze(1)
+                #depth_out[mask_e] = 1.
+                #print(depth_out.shape)
+                #assert 1==0
+            else:
+                disp_low = torch.floor(disp_gt_l)
+                cv_low = F.one_hot(disp_low.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
+                disp_up = torch.ceil(disp_gt_l)
+                cv_up = F.one_hot(disp_up.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
+                x = -(disp_gt_l - disp_up)
+                
+                b,c,d,h,w = cv_low.shape
+                cv_low = cv_low.permute(1,2,0,3,4)
+                cv_up = cv_up.permute(1,2,0,3,4)
+                x = x.squeeze(1)
+                low = cv_low*x
+                
+                up = cv_up*(1-x)
+                low = low.permute(2,0,1,3,4)
+                up = up.permute(2,0,1,3,4)
+                
+                gt_cv = low+up
+                gt_cv = gt_cv.cuda()
 
             ###TEST###
             #dsr = DisparityRegression(cfg.ARGS.MAX_DISP)
@@ -241,6 +284,8 @@ def train_sample(sample, psmnet_model, discriminator,
         else:
             gt_cv = F.one_hot(gt_disp, num_classes=cfg.ARGS.MAX_DISP).float().cuda().permute(0,1,4,2,3)
         cost_vol = cost_vol.unsqueeze(1)
+
+        #print(cost_vol.shape, gt_cv.shape)
         #print(cost_vol.shape, gt_cv.shape)
 
         set_requires_grad([discriminator], False)
@@ -265,9 +310,14 @@ def train_sample(sample, psmnet_model, discriminator,
 
         #print(gt_disp.shape, gt_cv.shape, cost_vol.shape)
         #loss_psmnet = F.binary_cross_entropy(cost_vol, gt_cv, reduction = 'mean')
-        loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
-               + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
-               + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
+        if args.usedepth:
+            loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], depth_gt[mask], reduction='mean') \
+               + 0.7 * F.smooth_l1_loss(pred_disp2[mask], depth_gt[mask], reduction='mean') \
+               + F.smooth_l1_loss(pred_disp3[mask], depth_gt[mask], reduction='mean')
+        else:
+            loss_psmnet = 0.5 * F.smooth_l1_loss(pred_disp1[mask], disp_gt_l[mask], reduction='mean') \
+                + 0.7 * F.smooth_l1_loss(pred_disp2[mask], disp_gt_l[mask], reduction='mean') \
+                + F.smooth_l1_loss(pred_disp3[mask], disp_gt_l[mask], reduction='mean')
 
         if isAdv:
             sim_loss = loss_psmnet * args.loss_ratio_sim + loss_adversarial * args.loss_ratio_adversarial
@@ -430,15 +480,19 @@ def train_sample(sample, psmnet_model, discriminator,
                                      pred_disp,
                                      img_focal_length,
                                      img_baseline,
-                                     mask)
+                                     mask,
+                                     isdisp=not args.usedepth)
     scalar_outputs_psmnet.update(err_metrics)
     # Compute error images
-    pred_disp_err_np = disp_error_img(pred_disp[[0]], disp_gt_l[[0]], mask[[0]])
+    if args.usedepth:
+        pred_disp_err_np = depth_error_img(pred_disp[[0]]*1000, depth_gt[[0]]*1000, mask[[0]])
+    else:
+        pred_disp_err_np = disp_error_img(pred_disp[[0]], disp_gt_l[[0]], mask[[0]])
     pred_disp_err_tensor = torch.from_numpy(np.ascontiguousarray(pred_disp_err_np[None].transpose([0, 3, 1, 2])))
     img_outputs_psmnet = {
-        'disp_gt_l': disp_gt_l[[0]].repeat([1, 3, 1, 1]),
-        'disp_pred': pred_disp[[0]].repeat([1, 3, 1, 1]),
-        'disp_err': pred_disp_err_tensor,
+        'disp/depth_gt_l': depth_gt[[0]].repeat([1, 3, 1, 1]),
+        'disp/depth_pred': pred_disp[[0]].repeat([1, 3, 1, 1]),
+        'disp/depth_err': pred_disp_err_tensor,
         'input_L': img_L,
         'input_R': img_R
     }
@@ -475,7 +529,8 @@ if __name__ == '__main__':
 
 
     # Create PSMNet model
-    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, loss='BCE', transform=False).to(cuda_device)
+    isdisp = not args.usedepth
+    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, loss='BCE', transform=False, isdisp=isdisp, max_depth=cfg.ARGS.MAX_DEPTH).to(cuda_device)
     psmnet_optimizer = torch.optim.Adam(psmnet_model.parameters(), lr=cfg.SOLVER.LR_CASCADE, betas=(0.9, 0.999))
     if is_distributed:
         psmnet_model = torch.nn.parallel.DistributedDataParallel(

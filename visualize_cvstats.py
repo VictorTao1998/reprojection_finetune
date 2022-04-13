@@ -7,23 +7,35 @@ import plotly.express as px
 import pandas as pd
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
-pred_depth_path = "/media/jianyu/dataset/eval/cost_vol_visual/03_19_2022_23_03_37_/pred_depth_abs_err_cmap"
+pred_disp_path = "/media/jianyu/dataset/eval/cost_vol_visual/03_19_2022_23_03_37_/pred_disp_abs_err_cmap"
 pred_cv_path = "/media/jianyu/dataset/eval/cost_vol_visual/03_19_2022_23_03_37_/cost_vol_pcd"
-gt_disp_path = "/media/jianyu/dataset/eval/cost_vol_visual/03_19_2022_23_03_37_/gt_disp"
-prefix = "0-300002-2"
+#gt_disp_path = "/media/jianyu/dataset/eval/psm_depth/vanilla/03_26_2022_20_32_36_/gt_disp"
+prefix = "0-300002-0"
 width = 480
 height = 640
+isdisp = True
+if isdisp:
+    ndisp = 192
+else:
+    ndisp = 160
 
 fig, ax = plt.subplots()
 
 #gt_disp = np.array(Image.open(os.path.join(gt_disp_path, prefix+'.png')), formats="L")
 #print(gt_disp.shape)
-depth_image = plt.imread(os.path.join(pred_depth_path, prefix + '.png'))
+disp_image = plt.imread(os.path.join(pred_disp_path, prefix + '.png'))
 cv_np = np.load(os.path.join(pred_cv_path, prefix + '-data.npy'))
+#print(cv_np.shape)
 #fig, ax = plt.subplots()
-sc = ax.imshow(depth_image)
+sc = ax.imshow(disp_image)
 mask = cv_np[:,200,300] > 1e-4
-x = np.array(list(range(192)))[mask]
+if isdisp:
+    xa = np.array(list(range(ndisp)))
+    xtext = 'disp'
+else:
+    xa = np.arange(0.01,1.61,0.01)
+    xtext = 'depth'
+x = xa[mask]
 plt.plot(x,cv_np[:,200,300][mask])
 img_buf = io.BytesIO()
 plt.savefig(img_buf, format='png')
@@ -59,11 +71,13 @@ def update_annot(ind):
         annot.xybox = (annot.xybox[0],-200)
 
     mask = cv_np[:,pos[1],pos[0]] > 1e-4
-    x = np.array(list(range(192)))[mask]
+
+    x = xa[mask]
     y = cv_np[:,pos[1],pos[0]][mask]
-    z = {"disp":x, "prob":y}
+    
+    z = {xtext:x, "prob":y}
     f = pd.DataFrame(z)
-    fig = px.line(f, x="disp", y="prob")
+    fig = px.line(f, x=xtext, y="prob")
     #fig.add_scatter(x=[gt], y=[0])
     img_buf = io.BytesIO()
     fig.write_image(img_buf)

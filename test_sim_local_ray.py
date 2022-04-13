@@ -15,7 +15,7 @@ from datasets.messytable_test_local import get_test_loader
 import open3d as o3d
 from utils.np_utils import *
 # from nets.psmnet import PSMNet
-from nets.psmnet import PSMNet
+from nets.psmnet_ray import PSMNet, Renderer
 from nets.transformer import Transformer
 from utils.cascade_metrics import compute_err_metric, compute_obj_err
 from utils.config import cfg
@@ -28,6 +28,7 @@ from utils.test_util import (
 )
 from utils.util import depth_error_img, disp_error_img, get_time_string, setup_logger
 from utils.warp_ops import apply_disparity_cu
+from nets.psmnet_submodule_ray import *
 
 parser = argparse.ArgumentParser(description="Testing for Reprojection + PSMNet")
 parser.add_argument(
@@ -86,9 +87,6 @@ parser.add_argument(
 parser.add_argument(
     "--cv", action="store_true", default=False
 )
-parser.add_argument(
-    "--usedepth", action="store_true", default=False
-)
 
 
 
@@ -96,47 +94,35 @@ args = parser.parse_args()
 cfg.merge_from_file(args.config_file)
 cuda_device = torch.device("cuda:{}".format(args.local_rank))
 # If path to gan model is not specified, use gan model from cascade model
-isdisp = not args.usedepth
+
 if args.gan_model == "":
     args.gan_model = args.model
 
 # Calculate error for real and 3D printed objects
 real_obj_id = [4, 5, 7, 9, 13, 14, 15, 16]
 
-if args.cv and isdisp:
-    space = 1
-    index_p = np.array([list(x) for x in np.ndindex(192,544,960)])*space
-elif args.cv and not isdisp:
-    space = 1
-    index_p = np.array([list(x) for x in np.ndindex(160,544,960)])*space
-    #index_p = 
+
 
 # python test_psmnet_with_confidence.py --model /code/models/model_4.pth --onreal --exclude-bg --exclude-zeros
 # python test_psmnet_with_confidence.py --config-file configs/remote_test.yaml --model ../train_8_14_cascade/train1/models/model_best.pth --onreal --exclude-bg --exclude-zeros --debug --gan-model
 
 
-def test(psmnet_model, val_loader, logger, log_dir):
+def test(psmnet_model, render_model, rayreg_model, val_loader, logger, log_dir):
     #transformer_model.eval()
     psmnet_model.eval()
-    if isdisp:
-        total_err_metrics = {
-            "epe": 0,
-            "bad1": 0,
-            "bad2": 0,
-            "depth_abs_err": 0,
-            "depth_err2": 0,
-            "depth_err4": 0,
-            "depth_err8": 0,
-            "normal_err": 0,
-        }
-    else:
-        total_err_metrics = {
-            "depth_abs_err": 0,
-            "depth_err2": 0,
-            "depth_err4": 0,
-            "depth_err8": 0,
-            "normal_err": 0,
-        }
+    render_model.eval()
+
+    total_err_metrics = {
+        "epe": 0,
+        "bad1": 0,
+        "bad2": 0,
+        "depth_abs_err": 0,
+        "depth_err2": 0,
+        "depth_err4": 0,
+        "depth_err8": 0,
+        "normal_err": 0,
+    }
+
     total_obj_disp_err = np.zeros(cfg.SPLIT.OBJ_NUM)
     total_obj_depth_err = np.zeros(cfg.SPLIT.OBJ_NUM)
     total_obj_depth_4_err = np.zeros(cfg.SPLIT.OBJ_NUM)
@@ -172,6 +158,13 @@ def test(psmnet_model, val_loader, logger, log_dir):
         cam_intrinsic[:, :2] /= 2
 
         # Note(rayc): the resize and padding should be done in the dataloader,along with cam_intrinsic
+        img_L = F.interpolate(
+            img_L, (540, 960), mode="bilinear", recompute_scale_factor=False
+        )
+        img_R = F.interpolate(
+            img_R, (540, 960), mode="bilinear", recompute_scale_factor=False
+        )
+
         img_disp_l = F.interpolate(
             img_disp_l, (540, 960), mode="nearest", recompute_scale_factor=False
         )
@@ -227,15 +220,16 @@ def test(psmnet_model, val_loader, logger, log_dir):
         #    img_L_transformed, img_R_transformed = transformer_model(img_L, img_R)
 
         # Pad the imput image and depth disp image to 960 * 544
-        right_pad = cfg.REAL.PAD_WIDTH - 960
-        top_pad = cfg.REAL.PAD_HEIGHT - 540
+        right_pad = 0
+        top_pad = 4
         img_L = F.pad(
             img_L, (0, right_pad, top_pad, 0, 0, 0, 0, 0), mode="constant", value=0
         )
+        
         img_R = F.pad(
             img_R, (0, right_pad, top_pad, 0, 0, 0, 0, 0), mode="constant", value=0
         )
-        calib = img_focal_length * img_baseline
+
         """
         img_L_transformed = F.pad(
             img_L_transformed,
@@ -275,210 +269,58 @@ def test(psmnet_model, val_loader, logger, log_dir):
         )
 
         with torch.no_grad():#, pred_conf, cost
-            pred_disp, cost_vol = psmnet_model(
-                img_L, img_R, calib=calib#, img_L_transformed, img_R_transformed
+            cost_vol = psmnet_model(
+                img_L, img_R
             )
+            B,C,D,H,W = cost_vol.shape
+            
+            ray = cost_vol.view(B,C,D,H*W)  
+            #print(ray.shape)
+            pred_disp = torch.zeros([1,1,H*W]).to(cuda_device)
+            #print(pred_disp.shape)
+            n = 10240
+
+            for i in range(int(H*W/n)):
+                ray_c = ray[:,:,:,i*n:(i+1)*n]
+                disp_candidate = torch.arange(0,cfg.ARGS.MAX_DISP).float().to(cuda_device).expand(n,-1).permute(1,0)+0.5
+                disp_candidate_g = ((disp_candidate/192.) * 2.)-1.
+                D = 192
+
+                disp_cand_n = torch.arange(0, n).float().to(cuda_device).expand(192,-1)
+            
+                disp_cand_grid = torch.cat((disp_candidate_g[...,None], disp_cand_n[...,None]), -1).view(B,D,n,2)
+
+                pts_feat = F.grid_sample(ray_c, disp_cand_grid, mode='bilinear', padding_mode='zeros', align_corners=True)
+                
+                disp_fea = disp_candidate_g[None,None,:,:]
+                pts_feat = torch.cat((pts_feat, disp_fea), 1).view(B,D*n,C+1)
+
+                alpha = render_model(pts_feat)
+                output = alpha.view(B,D,n,1)
+                #print(output.shape, disp_candidate.shape)
+                pred_disp_c = rayreg_model(output, disp_candidate[None,:,:,None]).view(B,1,n)
+                pred_disp[0,0,i*n:(i+1)*n] = pred_disp_c
+
+            pred_disp = pred_disp.view(1,1,H,W)
+
         pred_disp = pred_disp[
             :, :, top_pad:, :
         ]  # TODO: if right_pad > 0 it needs to be (:-right_pad)
         #pred_conf = pred_conf[:, :, top_pad:, :]
         #pred_conf = pred_conf.detach().cpu().numpy()[0, 0]
-        if isdisp:
-            pred_depth = img_focal_length * img_baseline / pred_disp  # pred depth in m
-        else:
-            pred_depth = pred_disp
+
+        pred_depth = img_focal_length * img_baseline / pred_disp  # pred depth in m
+
 
         # Get loss metric
         
         err_metrics = compute_err_metric(
-            img_disp_l, img_depth_l, pred_disp, img_focal_length, img_baseline, mask, isdisp=isdisp
+            img_disp_l, img_depth_l, pred_disp, img_focal_length, img_baseline, mask, isdisp=True
         )
         for k in total_err_metrics.keys():
             if k != 'normal_err':
                 total_err_metrics[k] += err_metrics[k]
-        if args.cv and isdisp:
-            disp_low = torch.floor(img_disp_l)
-            cv_low = F.one_hot(disp_low.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
-            disp_up = torch.ceil(img_disp_l)
-            cv_up = F.one_hot(disp_up.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
-            x = -(img_disp_l - disp_up)
-            
-            b,c,d,h,w = cv_low.shape
-            cv_low = cv_low.permute(1,2,0,3,4)
-            cv_up = cv_up.permute(1,2,0,3,4)
-            x = x.squeeze(1)
-            low = cv_low*x
-            
-            up = cv_up*(1-x)
-            low = low.permute(2,0,1,3,4)
-            up = up.permute(2,0,1,3,4)
-            
-            gt_cv = low+up
-            gt_cv = gt_cv.squeeze(0).cpu()
-            #print(gt_cv.shape, cost_vol.shape)
-            #print()
-
-            
-            b,d,w,h = cost_vol.shape
-            #print(b,d,w,h)
-            frustum_point = np.zeros([d*(w-top_pad)*h,3])
-            #gt_frustum_point = np.zeros([d*(w-top_pad)*h,3])
-            for disp in range(1, d):
-                c_layer = (np.ones([w,h])*disp).astype(float)
-                c_layer = c_layer[top_pad:, :]
-                #print(c_layer.shape, img_focal_length.cpu().numpy()[0,0,0,0], img_baseline.cpu().numpy()[0,0,0,0])
-                c_depth = img_focal_length.cpu().numpy()[0,0,0,0] * img_baseline.cpu().numpy()[0,0,0,0] / c_layer
-                c_pts = depth2pts_np(c_depth, cam_intrinsic, np.eye(4))
-                c_pts = np.reshape(c_pts, [c_pts.shape[0], c_pts.shape[1]])
-                
-                #print(c_pts.shape)
-                frustum_point[disp*c_pts.shape[0]:(disp+1)*c_pts.shape[0],:] = c_pts
-            
-            
-            frustum_point = frustum_point.reshape([-1,3])[c_pts.shape[0]:,:]
-            #print(frustum_point.shape)
-            #print(cost_vol.shape)
-            cost_c = cost_vol.cpu().numpy().reshape([d*w*h,1])
-            cost_c_save = cost_vol.cpu().numpy()[0,:,top_pad:,:]
-            #print(cost_c_save.shape, type(prefix))
-            cv_fname = os.path.join(log_dir, 'cost_vol_pcd', prefix + '-data.npy')
-            np.save(cv_fname, cost_c_save)
-            #print(np.max(cost_c), np.min(cost_c))
-            nonzeromask = (cost_c[:,0] > 1e-4)
-            
-            frustum_c = cost_vol.cpu().numpy()[:,:,top_pad:,:].reshape([d*(w-top_pad)*h,1])[c_pts.shape[0]:,:]
-            gt_frustum_c = gt_cv.numpy().reshape([d*(w-top_pad)*h,1])[c_pts.shape[0]:,:]
-            nonzeromask_frustum = (frustum_c[:,0] > 1e-4)
-            gt_nonzeromask_frustum = (gt_frustum_c[:,0] > 1e-4)
-
-            #print(frustum_c.shape, frustum_point.shape)
-            cost_c = cost_c[nonzeromask,:]
-            frustum_c = frustum_c[nonzeromask_frustum,:]
-            gt_frustum_c = gt_frustum_c[gt_nonzeromask_frustum,:]
-            #print(np.max(cost_c), np.min(cost_c))
-            #print(frustum_point.shape,nonzeromask_frustum.shape)
-            #print(np.sum(frustum_point!=0), frustum_point.shape)
-            frustum_point_p = frustum_point[nonzeromask_frustum, :]
-            gt_frustum_point = frustum_point[gt_nonzeromask_frustum, :]
-            #print(np.sum(frustum_point!=0))
-            #print(frustum_point.shape)
-            cost_point = index_p[nonzeromask,:]
-            cost_color = cm.jet(cost_c)[..., :3].squeeze(axis=1)
-            frustum_color = cm.jet(frustum_c)[..., :3].squeeze(axis=1)
-            gt_frustum_color = cm.jet(gt_frustum_c)[..., :3].squeeze(axis=1)
-
-            cost_vol_pcd = o3d.geometry.PointCloud()
-            frustum_pcd = o3d.geometry.PointCloud()
-            gt_frustum_pcd = o3d.geometry.PointCloud()
-
-            cost_vol_pcd.points = o3d.utility.Vector3dVector(cost_point)
-            cost_vol_pcd.colors = o3d.utility.Vector3dVector(cost_color)
-
-            #frustum_point = frustum_point.astype(int)
-            #print(cost_point.dtype, frustum_point.dtype, frustum_color.shape)
-            
-            frustum_pcd.points = o3d.utility.Vector3dVector(frustum_point_p)
-            frustum_pcd.colors = o3d.utility.Vector3dVector(frustum_color)
-
-            gt_frustum_pcd.points = o3d.utility.Vector3dVector(gt_frustum_point)
-            gt_frustum_pcd.colors = o3d.utility.Vector3dVector(gt_frustum_color)
-            
-            o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '.ply'), cost_vol_pcd)
-            o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '_frustum.ply'), frustum_pcd)
-            o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '_gt_frustum.ply'), gt_frustum_pcd)
-        elif args.cv and not isdisp:
-            depth_value = torch.arange(0.01, 0.01+cfg.ARGS.MAX_DEPTH, 0.01).float().numpy()
-            
-            """
-            disp_low = torch.floor(img_disp_l)
-            cv_low = F.one_hot(disp_low.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
-            disp_up = torch.ceil(img_disp_l)
-            cv_up = F.one_hot(disp_up.long(), num_classes=cfg.ARGS.MAX_DISP).float().permute(0,1,4,2,3)
-            x = -(img_disp_l - disp_up)
-            
-            b,c,d,h,w = cv_low.shape
-            cv_low = cv_low.permute(1,2,0,3,4)
-            cv_up = cv_up.permute(1,2,0,3,4)
-            x = x.squeeze(1)
-            low = cv_low*x
-            
-            up = cv_up*(1-x)
-            low = low.permute(2,0,1,3,4)
-            up = up.permute(2,0,1,3,4)
-            
-            gt_cv = low+up
-            gt_cv = gt_cv.squeeze(0).cpu()
-            """
-
-            b,d,w,h = cost_vol.shape
-            #print(b,d,w,h)
-            frustum_point = np.zeros([d*(w-top_pad)*h,3])
-            #gt_frustum_point = np.zeros([d*(w-top_pad)*h,3])
-            
-            for depth in range(depth_value.shape[0]):
-                c_layer = (np.ones([w,h])*depth_value[depth]).astype(float)
-                c_depth = c_layer[top_pad:, :]
-                #print(c_layer.shape, img_focal_length.cpu().numpy()[0,0,0,0], img_baseline.cpu().numpy()[0,0,0,0])
-                #c_depth = img_focal_length.cpu().numpy()[0,0,0,0] * img_baseline.cpu().numpy()[0,0,0,0] / c_layer
-                c_pts = depth2pts_np(c_depth, cam_intrinsic, np.eye(4))
-                c_pts = np.reshape(c_pts, [c_pts.shape[0], c_pts.shape[1]])
-                
-                #print(c_pts.shape)
-                frustum_point[depth*c_pts.shape[0]:(depth+1)*c_pts.shape[0],:] = c_pts
-            
-            
-            #frustum_point = frustum_point.reshape([-1,3])[c_pts.shape[0]:,:]
-            #print(frustum_point.shape)
-            #print(cost_vol.shape)
-            cost_c = cost_vol.cpu().numpy().reshape([d*w*h,1])
-            cost_c_save = cost_vol.cpu().numpy()[0,:,top_pad:,:]
-            #print(cost_c_save.shape, type(prefix))
-            cv_fname = os.path.join(log_dir, 'cost_vol_pcd', prefix + '-data.npy')
-            np.save(cv_fname, cost_c_save)
-            #print(np.max(cost_c), np.min(cost_c))
-            nonzeromask = (cost_c[:,0] > 1e-4)
-            
-            frustum_c = cost_vol.cpu().numpy()[:,:,top_pad:,:].reshape([d*(w-top_pad)*h,1])
-            #gt_frustum_c = gt_cv.numpy().reshape([d*(w-top_pad)*h,1])[c_pts.shape[0]:,:]
-            nonzeromask_frustum = (frustum_c[:,0] > 1e-4)
-            #gt_nonzeromask_frustum = (gt_frustum_c[:,0] > 1e-4)
-
-            #print(frustum_c.shape, frustum_point.shape)
-            cost_c = cost_c[nonzeromask,:]
-            frustum_c = frustum_c[nonzeromask_frustum,:]
-            #gt_frustum_c = gt_frustum_c[gt_nonzeromask_frustum,:]
-            #print(np.max(cost_c), np.min(cost_c))
-            #print(frustum_point.shape,nonzeromask_frustum.shape)
-            #print(np.sum(frustum_point!=0), frustum_point.shape)
-            frustum_point_p = frustum_point[nonzeromask_frustum, :]
-            #gt_frustum_point = frustum_point[gt_nonzeromask_frustum, :]
-            #print(np.sum(frustum_point!=0))
-            #print(frustum_point.shape)
-            cost_point = index_p[nonzeromask,:]
-            cost_color = cm.jet(cost_c)[..., :3].squeeze(axis=1)
-            frustum_color = cm.jet(frustum_c)[..., :3].squeeze(axis=1)
-            #gt_frustum_color = cm.jet(gt_frustum_c)[..., :3].squeeze(axis=1)
-
-            cost_vol_pcd = o3d.geometry.PointCloud()
-            frustum_pcd = o3d.geometry.PointCloud()
-            #gt_frustum_pcd = o3d.geometry.PointCloud()
-
-            cost_vol_pcd.points = o3d.utility.Vector3dVector(cost_point)
-            cost_vol_pcd.colors = o3d.utility.Vector3dVector(cost_color)
-
-            #frustum_point = frustum_point.astype(int)
-            #print(cost_point.dtype, frustum_point.dtype, frustum_color.shape)
-            
-            frustum_pcd.points = o3d.utility.Vector3dVector(frustum_point_p)
-            frustum_pcd.colors = o3d.utility.Vector3dVector(frustum_color)
-
-            #gt_frustum_pcd.points = o3d.utility.Vector3dVector(gt_frustum_point)
-            #gt_frustum_pcd.colors = o3d.utility.Vector3dVector(gt_frustum_color)
-            
-            o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '.ply'), cost_vol_pcd)
-            o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '_frustum.ply'), frustum_pcd)
-            #o3d.io.write_point_cloud(os.path.join(log_dir, 'cost_vol_pcd', prefix + '_gt_frustum.ply'), gt_frustum_pcd)
-
+        
 
         # Get disparity image
         pred_disp_np = pred_disp.squeeze(0).squeeze(0).detach().cpu().numpy()  # [H, W]
@@ -524,7 +366,7 @@ def test(psmnet_model, val_loader, logger, log_dir):
             #pred_conf,
             mask,
             cam_intrinsic=cam_intrinsic,
-            isdisp=isdisp
+            isdisp=True
         )
         #print(np.sum(np.isnan(angle)))
         
@@ -620,13 +462,17 @@ def main():
     # Get cascade model
     logger.info(f"Loaded the checkpoint: {args.model}")
     #transformer_model = Transformer().to(cuda_device)
-    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, transform=False, isdisp=isdisp, max_depth=cfg.ARGS.MAX_DEPTH).to(cuda_device)
+    psmnet_model = PSMNet(maxdisp=cfg.ARGS.MAX_DISP, transform=False).to(cuda_device)
+    render_model = Renderer(D=8, W=256, input_ch=1, output_ch=1, input_ch_feat=8, skips=[4]).to(cuda_device)
+    rayreg_model = RayRegression().to(cuda_device)
+
     #transformer_model_dict = load_from_dataparallel_model(args.model, "Transformer")
     #transformer_model.load_state_dict(transformer_model_dict)
     psmnet_model_dict = load_from_dataparallel_model(args.model, "PSMNet")
     psmnet_model.load_state_dict(psmnet_model_dict)
-
-    test(psmnet_model, val_loader, logger, log_dir)
+    render_model_dict = load_from_dataparallel_model(args.model, "Render")
+    render_model.load_state_dict(render_model_dict)
+    test(psmnet_model, render_model, rayreg_model, val_loader, logger, log_dir)
 
 
 if __name__ == "__main__":

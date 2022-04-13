@@ -92,12 +92,12 @@ class MessytableOnRealDataset(Dataset):
             img_label = [os.path.join(cfg.REAL.DATASET, p, cfg.SPLIT.LABEL) for p in prefix]
 
             if debug is True:
-                img_L = img_L[:sub]
-                img_R = img_R[:sub]
-                img_depth_l = img_depth_l[:sub]
-                img_depth_r = img_depth_r[:sub]
-                img_meta = img_meta[:sub]
-                img_label = img_label[:sub]
+                img_L = img_L[0]
+                img_R = img_R[0]
+                img_depth_l = img_depth_l[0]
+                img_depth_r = img_depth_r[0]
+                img_meta = img_meta[0]
+                img_label = img_label[0]
 
         return img_L, img_R, img_depth_l, img_depth_r, img_meta, img_label
 

@@ -66,6 +66,7 @@ _C.SOLVER.NUM_WORKER = 1                # num_worker in dataloader
 _C.ARGS = CN()
 _C.ARGS.MAX_DISP = 192              # maximum disparity
 _C.ARGS.MAX_DEPTH = 1.6
+_C.ARGS.OFFSET = 0.01
 _C.ARGS.MODEL = 'gwcnet-c'
 _C.ARGS.GRAD_METHOD = 'detach'
 _C.ARGS.NDISP = (48, 24)            # ndisps

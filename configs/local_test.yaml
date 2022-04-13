@@ -5,6 +5,8 @@ DIR:
   DATASET: '/media/jianyu/dataset/messy-table-dataset/real_v9/training/'  #  path to your sim testing dataset
 
 # Split files
+ARGS:
+  MAX_DEPTH: 1.6
 SPLIT:
   VAL: '/media/jianyu/dataset/messy-table-dataset/real_v9/training_lists/all.txt'  # training lists of your sim dataset
 #  VAL: '/isabella-fast/FeatureGAN/lists/newTest.txt'  # training lists of your sim dataset
