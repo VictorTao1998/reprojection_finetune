@@ -376,7 +376,7 @@ if __name__ == '__main__':
     psmnet_optimizer = torch.optim.Adam(psmnet_model.parameters(), lr=5e-4, betas=(0.9, 0.999))
     if is_distributed:
         psmnet_model = torch.nn.parallel.DistributedDataParallel(
-            psmnet_model, device_ids=[args.local_rank], output_device=args.local_rank)
+            psmnet_model, device_ids=[args.local_rank], output_device=args.local_rank, find_unused_parameters=True)
     else:
         psmnet_model = torch.nn.DataParallel(psmnet_model)
 
@@ -384,7 +384,7 @@ if __name__ == '__main__':
     render_optimizer = torch.optim.Adam(render_model.parameters(), lr=5e-4, betas=(0.9, 0.999))
     if is_distributed:
         render_model = torch.nn.parallel.DistributedDataParallel(
-            render_model, device_ids=[args.local_rank], output_device=args.local_rank)
+            render_model, device_ids=[args.local_rank], output_device=args.local_rank, find_unused_parameters=True)
     else:
         render_model = torch.nn.DataParallel(render_model)
 
