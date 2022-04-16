@@ -270,7 +270,7 @@ class Renderer(nn.Module):
 
         #self.rgb_linear.apply(weights_init)
 
-    def forward(self, x, disp_candidate):
+    def forward(self, x, disp_candidate,B,D):
 
         dim = x.shape[-1]
         #in_ch_feat = dim-self.in_ch_pts
