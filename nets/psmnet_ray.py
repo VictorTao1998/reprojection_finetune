@@ -286,7 +286,7 @@ class Renderer(nn.Module):
 
         alpha = torch.relu(self.alpha_linear(h))
         output = alpha.view(B,D,self.n_rays,1)
-        pred_disp = self.rayreg_model(output, disp_candidate)
+        pred_disp = self.ray_reg(output, disp_candidate)
         return pred_disp
 
 def weights_init(m):
