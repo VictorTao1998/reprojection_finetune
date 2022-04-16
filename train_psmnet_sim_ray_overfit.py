@@ -78,7 +78,7 @@ logger.info(f'Running with {num_gpus} GPUs')
 # python -m torch.distributed.launch train_psmnet_temporal_ir_reproj.py --config-file configs/remote_train_primitive_randscenes.yaml --summary-freq 10 --save-freq 100 --logdir ../train_10_21_psmnet_smooth_ir_reproj/debug --debug
 
 
-def train(psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg_model, TrainImgLoader, ValImgLoader):
+def train(psmnet_model, psmnet_optimizer, render_model, render_optimizer, TrainImgLoader, ValImgLoader):
     for epoch_idx in range(cfg.SOLVER.EPOCHS):
         # One epoch training loop
         avg_train_scalars_psmnet = AverageMeterDict()
@@ -98,7 +98,7 @@ def train(psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg
             do_summary = global_step % args.summary_freq == 0
             # Train one sample
             scalar_outputs_psmnet, img_outputs_psmnet = \
-                train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg_model, isTrain=True)
+                train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_optimizer, isTrain=True)
             # Save result to tensorboard
             if (not is_distributed) or (dist.get_rank() == 0):
                 scalar_outputs_psmnet = tensor2float(scalar_outputs_psmnet)
@@ -132,15 +132,13 @@ def train(psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg
         gc.collect()
 
 
-def train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg_model, isTrain=True):
+def train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_optimizer, isTrain=True):
     if isTrain:
         render_model.train()
         psmnet_model.train()
-        rayreg_model.train()
     else:
         render_model.eval()
         psmnet_model.eval()
-        rayreg_model.eval()
 
     # Load data
     img_L = sample['img_L'].to(cuda_device)  # [bs, 3, H, W]
@@ -217,7 +215,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_op
         disp_fea = disp_candidate_g[None,None,:,:]
         pts_feat = torch.cat((pts_feat, disp_fea), 1).view(B,D*args.n_rays,C+1)
 
-        pred_disp = render_model(pts_feat, disp_candidate,B,D)
+        pred_disp = render_model(pts_feat, disp_candidate[None,:,:,None],B,D)
 
         #output = alpha.view(B,D,args.n_rays,1)
 
@@ -227,7 +225,6 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_op
         #for i in range(args.n_rays):
         #    assert gt_out[0,0,i,0] == disp_gt_l[0,0,xs[i],ys[i]]
 
-        pred_disp = rayreg_model(output, disp_candidate[None,:,:,None])
         #print(pts_feat.shape, alpha.shape, output.shape, gt_out.shape, disp_gt_l.shape, pred_disp.shape)
 
         loss_psmnet = F.smooth_l1_loss(pred_disp[mask_p], gt_out[mask_p], reduction='mean')
@@ -391,7 +388,6 @@ if __name__ == '__main__':
     else:
         render_model = torch.nn.DataParallel(render_model)
 
-    rayreg_model = RayRegression().to(cuda_device)
 
     #psm_param = sum(p.numel() for p in psmnet_model.parameters() if p.requires_grad)
     #trans_param = sum(p.numel() for p in transformer_model.parameters() if p.requires_grad)
@@ -399,4 +395,4 @@ if __name__ == '__main__':
     
 
     # Start training
-    train(psmnet_model, psmnet_optimizer, render_model, render_optimizer, rayreg_model, TrainImgLoader, ValImgLoader)
+    train(psmnet_model, psmnet_optimizer, render_model, render_optimizer, TrainImgLoader, ValImgLoader)
