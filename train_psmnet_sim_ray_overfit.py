@@ -217,7 +217,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_op
         disp_fea = disp_candidate_g[None,None,:,:]
         pts_feat = torch.cat((pts_feat, disp_fea), 1).view(B,D*args.n_rays,C+1)
 
-        pred_disp = render_model(pts_feat, disp_candidate)
+        pred_disp = render_model(pts_feat, disp_candidate,B,D)
 
         #output = alpha.view(B,D,args.n_rays,1)
 
