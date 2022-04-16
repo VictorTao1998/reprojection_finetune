@@ -237,12 +237,13 @@ class PSMNet(nn.Module):
             return cost
 
 class Renderer(nn.Module):
-    def __init__(self, D=8, W=256, input_ch=3, output_ch=1, input_ch_feat=8, skips=[4]):
+    def __init__(self, D=8, W=256, input_ch=3, output_ch=1, input_ch_feat=8, skips=[4], n_rays=1024):
         """
         """
         super(Renderer, self).__init__()
         self.D = D
         self.W = W
+        self.n_rays = n_rays
         self.input_ch = input_ch
         #self.input_ch_views = input_ch_views
         self.skips = skips
@@ -265,9 +266,11 @@ class Renderer(nn.Module):
         #self.feature_linear.apply(weights_init)
         self.alpha_linear.apply(weights_init)
 
+        self.ray_reg = RayRegression()
+
         #self.rgb_linear.apply(weights_init)
 
-    def forward(self, x):
+    def forward(self, x, disp_candidate):
 
         dim = x.shape[-1]
         #in_ch_feat = dim-self.in_ch_pts
@@ -282,7 +285,9 @@ class Renderer(nn.Module):
                 h = torch.cat([input_pts, h], -1)
 
         alpha = torch.relu(self.alpha_linear(h))
-        return alpha
+        output = alpha.view(B,D,args.n_rays,1)
+        pred_disp = rayreg_model(output, disp_candidate)
+        return pred_disp
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
