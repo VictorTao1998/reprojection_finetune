@@ -259,13 +259,12 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_op
     #)
 
     # Backward on sim_ir_pattern reprojection
-    sim_loss = loss_psmnet
     if isTrain:
         #transformer_optimizer.zero_grad()
         psmnet_optimizer.zero_grad()
         render_optimizer.zero_grad()
         #print(sim_loss.item())
-        sim_loss.backward()
+        loss_psmnet.backward()
         psmnet_optimizer.step()
         render_optimizer.step()
         #transformer_optimizer.step()
@@ -329,7 +328,7 @@ def train_sample(sample, psmnet_model, psmnet_optimizer, render_model, render_op
     #pred_disp_err_np = disp_error_img(pred_disp[[0]], disp_gt_l[[0]], mask[[0]])
     #pred_disp_err_tensor = torch.from_numpy(np.ascontiguousarray(pred_disp_err_np[None].transpose([0, 3, 1, 2])))
     img_outputs_psmnet = {
-        #'disp/depth_gt_l': depth_gt[[0]].repeat([1, 3, 1, 1]),
+        'disp/depth_gt_l': disp_gt_l[[0]].repeat([1, 3, 1, 1]),
         #'disp/depth_pred': pred_disp[[0]].repeat([1, 3, 1, 1]),
         #'disp/depth_err': pred_disp_err_tensor,
         'input_L': img_L,

@@ -59,6 +59,7 @@ class MessytableOnRealDataset(Dataset):
         :param debug: Debug mode, load less data
         :param sub: If debug mode is enabled, sub will be the number of data loaded
         """
+        self.debug = debug
         self.img_L, self.img_R, self.img_depth_l, self.img_depth_r, self.img_meta, self.img_label = \
             self.__get_split_files__(split_file, debug, sub, isTest=False, onReal=onreal)
         self.gaussian_blur = gaussian_blur
@@ -90,7 +91,7 @@ class MessytableOnRealDataset(Dataset):
             img_depth_r = [os.path.join(cfg.DIR.DATASET, p, cfg.SPLIT.DEPTHR) for p in prefix]
             img_meta = [os.path.join(cfg.DIR.DATASET, p, cfg.SPLIT.META) for p in prefix]
             img_label = [os.path.join(cfg.REAL.DATASET, p, cfg.SPLIT.LABEL) for p in prefix]
-
+            
             if debug is True:
                 img_L = [img_L[0]]
                 img_R = [img_R[0]]
@@ -166,7 +167,7 @@ class MessytableOnRealDataset(Dataset):
         # img_real_rgb = img_real_rgb[2*x: 2*(x+th), 2*y: 2*(y+tw)]  # real original res in 1080*1920
 
         # Get data augmentation
-        custom_augmentation = __data_augmentation__(gaussian_blur=False, color_jitter=False)
+        custom_augmentation = __data_augmentation__(gaussian_blur=self.gaussian_blur, color_jitter=self.color_jitter)
 
         item = {}
         item['img_L'] = custom_augmentation(img_L_rgb).type(torch.FloatTensor)  # [bs, 1, H, W]

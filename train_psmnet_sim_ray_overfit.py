@@ -392,11 +392,6 @@ if __name__ == '__main__':
         render_model = torch.nn.DataParallel(render_model)
 
     rayreg_model = RayRegression().to(cuda_device)
-    if is_distributed:
-        rayreg_model = torch.nn.parallel.DistributedDataParallel(
-            rayreg_model, device_ids=[args.local_rank], output_device=args.local_rank)
-    else:
-        rayreg_model = torch.nn.DataParallel(rayreg_model)
 
     #psm_param = sum(p.numel() for p in psmnet_model.parameters() if p.requires_grad)
     #trans_param = sum(p.numel() for p in transformer_model.parameters() if p.requires_grad)
