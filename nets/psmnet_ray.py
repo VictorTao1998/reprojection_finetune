@@ -285,7 +285,7 @@ class Renderer(nn.Module):
                 h = torch.cat([input_pts, h], -1)
 
         alpha = torch.relu(self.alpha_linear(h))
-        output = alpha.view(B,D,args.n_rays,1)
+        output = alpha.view(B,D,self.n_rays,1)
         pred_disp = rayreg_model(output, disp_candidate)
         return pred_disp
 
